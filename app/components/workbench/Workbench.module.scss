@@ -1,0 +1,3168 @@
+.Workbench {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--workbench-width);
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bolt-elements-bg-depth-1);
+  border-left: 1px solid var(--bolt-elements-borderColor);
+  overflow: hidden;
+}
+
+/*
+ * Resize handle — a thin vertical strip pinned to the workbench's left edge.
+ * Anchored from the right (matching the workbench) and positioned via an
+ * inline `right: <width>px` so it tracks the user-resized width. When no
+ * override is set, it falls back to `right: var(--workbench-width)`.
+ * Wider hit area (8px) than visible bar (2px) so it's easy to grab.
+ */
+.WorkbenchResizer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: var(--workbench-width);
+  width: 8px;
+  margin-right: -4px;
+  z-index: calc(var(--z-workbench, 100) + 1);
+  cursor: col-resize;
+  background-color: transparent;
+  touch-action: none;
+  transition: background-color 0.15s ease;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    background-color: var(--bolt-elements-borderColor);
+    transition: background-color 0.15s ease;
+  }
+
+  &:hover::after,
+  &:active::after {
+    background-color: var(--scheme-accent);
+  }
+}
+
+.WorkbenchHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-2);
+  flex-shrink: 0;
+}
+
+/*
+ * Project name field — the editable text input on the LEFT side of the
+ * workbench header (replaces the old Code/Preview tab switcher).
+ *
+ * Minimal "underline" style: the field is just plain text with no background
+ * and no border. When the user clicks into it (focus), only a single bottom
+ * line (underline) appears in the accent color — nothing else. This reads as
+ * an inline editable label rather than a form control.
+ *
+ * The field is given flex: 1 on the left side via the header's
+ * justify-content: space-between, so it grows to fill the space between the
+ * left edge and the right-aligned action buttons.
+ */
+.ProjectNameField {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  max-width: 320px;
+  height: 28px;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s ease;
+
+  &:focus-within {
+    border-bottom-color: var(--scheme-accent);
+  }
+}
+
+.ProjectNameInput {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--bolt-elements-textPrimary);
+  padding: 0;
+  height: 100%;
+  cursor: text;
+
+  &::placeholder {
+    color: var(--bolt-elements-textTertiary);
+    font-weight: 400;
+  }
+}
+
+.HeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── More-menu dropdown (three-dot button) ──────────────────────────────── */
+
+/*
+ * MenuWrap — the relatively-positioned anchor that wraps the three-dot button
+ * and the absolutely-positioned dropdown panel. Lives inside .HeaderActions.
+ */
+.MenuWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/*
+ * MoreMenu — the floating dropdown panel.
+ *
+ * Dark elevated background, large rounded corners, soft drop shadow, subtle
+ * 1px border. Anchored to the right edge of the three-dot button, just below
+ * the header. Items are grouped (History / Canvas view / Export) with thin
+ * dividers and uppercase section labels.
+ */
+.MoreMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-menu, 100);
+  min-width: 224px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-3);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.24);
+  /* Subtle entrance: scale + fade in from the anchor. */
+  transform-origin: top right;
+  animation: moreMenuIn 0.12s ease-out;
+
+  @keyframes moreMenuIn {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(-2px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+}
+
+.MenuGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.MenuGroupLabel {
+  padding: 6px 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bolt-elements-textTertiary);
+}
+
+.MenuDivider {
+  height: 1px;
+  margin: 4px 2px;
+  background-color: var(--bolt-elements-borderColor);
+}
+
+/*
+ * MenuItem — a single row. Full-width button with icon + label on the left
+ * and either a keyboard shortcut or an active-state dot on the right.
+ */
+.MenuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bolt-elements-textPrimary);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    background-color: var(--bolt-elements-item-backgroundActive);
+  }
+
+  &:active {
+    background-color: var(--bolt-elements-item-backgroundActive);
+  }
+}
+
+.MenuItemIcon {
+  font-size: 16px;
+  color: var(--bolt-elements-textSecondary);
+  flex-shrink: 0;
+  transition: color 0.12s ease;
+}
+
+.MenuItemLabel {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.MenuItemShortcut {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--bolt-elements-textTertiary);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+/*
+ * Active (toggle ON) state: icon + label take the accent color, and a solid
+ * accent dot replaces the shortcut on the right.
+ */
+.MenuItemActive {
+  .MenuItemIcon,
+  .MenuItemLabel {
+    color: var(--scheme-accent);
+  }
+}
+
+.MenuItemDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--scheme-accent);
+  flex-shrink: 0;
+}
+
+/*
+ * Icon-only header buttons (more / search / shortcuts).
+ *
+ * Styled as tonal "squircle" buttons: solid dark-charcoal fill, subtle
+ * 1px border, high border-radius (continuous-curve look), light-gray icons.
+ * Fixed width so all three are exactly the same size, and deliberately
+ * narrower than the Run button (which is wider because it has a label).
+ */
+.HeaderIconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-3);
+  color: var(--bolt-elements-textSecondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    color: var(--bolt-elements-textPrimary);
+    background-color: var(--bolt-elements-bg-depth-4);
+    border-color: var(--bolt-elements-borderColorActive);
+  }
+
+  /* Pressed/open state — e.g. the three-dot button while its menu is open. */
+  &.active {
+    color: var(--scheme-accent);
+    background-color: var(--bolt-elements-bg-depth-4);
+    border-color: var(--scheme-accent);
+  }
+}
+
+.RunButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 16px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--scheme-accent-strong);
+  background-color: var(--scheme-accent-strong);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background-color: var(--scheme-accent);
+    border-color: var(--scheme-accent);
+  }
+
+  &:disabled {
+    cursor: progress;
+    opacity: 0.85;
+  }
+
+  &.running {
+    .RunButtonIcon {
+      animation: run-spin 0.8s linear infinite;
+    }
+  }
+}
+
+.RunButtonIcon {
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes run-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.PreviewRefreshButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--bolt-elements-textSecondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--bolt-elements-textPrimary);
+    background-color: var(--bolt-elements-item-backgroundActive);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.WorkbenchBody {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Code view: movable canvas ───────────────────────────────────────────── */
+
+.CodeView {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.EditorPane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.MovableCanvas {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  /*
+   * Disable text selection on the canvas surface. Rapid clicks/drags during
+   * panning were triggering the browser's text-selection behaviour and
+   * highlighting the zoom % label. user-select:none stops that entirely so
+   * the canvas only ever pans — never selects text.
+   */
+  user-select: none;
+  -webkit-user-select: none;
+  background-color: var(--bolt-elements-bg-depth-1);
+  background-image: radial-gradient(
+    circle,
+    rgba(40, 20, 55, 0.92) 1.2px,
+    transparent 1.4px
+  );
+  background-size: 24px 24px;
+
+  &.Panning {
+    cursor: grabbing;
+  }
+
+  /*
+   * When the grid is hidden (toggled off from the More-menu "Hide grid"),
+   * remove the dot-grid background-image entirely so the canvas becomes a
+   * plain flat colour. The background-color is retained so the surface still
+   * fills correctly.
+   */
+  &.MovableCanvasNoGrid {
+    background-image: none;
+  }
+}
+
+/* ── Canvas zoom controls (bottom-left corner) ──────────────────────────── */
+
+/*
+ * A vertical "pill" control group pinned to the bottom-left of the canvas.
+ * Contains three stacked buttons: zoom-in (+), fit-to-canvas (reset, with a
+ * live % readout), and zoom-out (−). Styled to match the header's squircle
+ * icon buttons — same bg/border tokens, same accent hover — but grouped into
+ * a single elevated container with thin dividers between buttons.
+ */
+.ZoomControls {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  /*
+   * Hard-coded #171717 (near-black) so the zoom pill matches the canvas's
+   * dark backdrop regardless of theme tokens. Buttons inside are transparent
+   * and inherit this fill.
+   */
+  background-color: #171717;
+  /*
+   * Make the % readout (and all button text/icons) non-selectable. Without
+   * this, double/triple clicks near the controls could highlight the "100%"
+   * label. Cascades to every child button and label.
+   */
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.38),
+    0 2px 6px rgba(0, 0, 0, 0.22);
+  /* Subtle entrance so the control feels layered above the canvas. */
+  animation: zoomControlsIn 0.16s ease-out;
+
+  @keyframes zoomControlsIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+}
+
+/*
+ * Individual zoom button. Column layout so the fit button can stack its icon
+ * over the % label. Transparent background — the container provides the fill.
+ */
+.ZoomBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--bolt-elements-textSecondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background-color 0.12s ease, color 0.12s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--scheme-accent);
+    background-color: #262626;
+  }
+
+  &:active:not(:disabled) {
+    background-color: #2a2a2a;
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+}
+
+/*
+ * The middle "fit" button is taller so it can show the icon above the
+ * percentage readout without crowding.
+ */
+.ZoomFit {
+  height: 42px;
+  gap: 1px;
+}
+
+.ZoomLabel {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--bolt-elements-textTertiary);
+  line-height: 1;
+  transition: color 0.12s ease;
+}
+
+/* Highlight the % label in the accent colour when the fit button is hovered. */
+.ZoomBtn:hover:not(:disabled) .ZoomLabel {
+  color: var(--scheme-accent);
+}
+
+/* Thin separator between the three buttons. */
+.ZoomDivider {
+  height: 1px;
+  margin: 0 4px;
+  background-color: var(--bolt-elements-borderColor);
+}
+
+/* ── Preview view ────────────────────────────────────────────────────────── */
+
+.PreviewView {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.PreviewToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-2);
+  flex-shrink: 0;
+}
+
+.AddressBar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: var(--bolt-elements-bg-depth-1);
+  border: 1px solid var(--bolt-elements-borderColor);
+  font-size: 12px;
+  color: var(--bolt-elements-textSecondary);
+
+  .AddressIcon {
+    font-size: 13px;
+    opacity: 0.7;
+  }
+}
+
+.PreviewBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-color: var(--bolt-elements-bg-depth-1);
+  padding: 32px;
+  text-align: center;
+  gap: 14px;
+}
+
+.PreviewIcon {
+  font-size: 48px;
+  color: var(--scheme-accent);
+  opacity: 0.7;
+}
+
+.PreviewTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--bolt-elements-textPrimary);
+}
+
+.PreviewText {
+  font-size: 13px;
+  color: var(--bolt-elements-textTertiary);
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+.PreviewTextAccent {
+  color: var(--scheme-accent);
+  font-weight: 600;
+}
+
+.PreviewFrame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background-color: white;
+}
+
+/* ── Mock running app (shown in Preview after clicking Run) ──────────────── */
+
+/*
+ * A white "browser viewport" container that wraps the mock app, so the
+ * preview reads as a real rendered app inside the workbench (white page on
+ * the dark workbench chrome) rather than another panel.
+ */
+.MockAppFrame {
+  flex: 1;
+  display: flex;
+  overflow: auto;
+  background-color: #ffffff;
+}
+
+/*
+ * The mock app's root — mirrors src/App.tsx from the sample file set:
+ * a full-height emerald→teal gradient with a centered column containing
+ * the app title, subtitle, and an interactive counter button.
+ */
+.MockAppRoot {
+  flex: 1;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+  gap: 16px;
+  background-image: linear-gradient(to bottom right, #10b981, #0d9488);
+  color: #ffffff;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+.MockAppTitle {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.MockAppSubtitle {
+  margin: 0;
+  font-size: 18px;
+  opacity: 0.9;
+}
+
+.MockAppButton {
+  margin-top: 16px;
+  padding: 12px 24px;
+  border-radius: 8px;
+  border: none;
+  background-color: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ── Action steps bar (bottom horizontal scroll) ─────────────────────────── */
+
+/*
+ * The bar's height is driven by a CSS variable so it can collapse cleanly.
+ * When the user clicks the caret arrow in the header, the workbench root gets
+ * `data-nodes-library="collapsed"` and the variable drops to the header-only
+ * height — the scroll area below is hidden, the bar shrinks to just its
+ * header, and the canvas above (flex:1 in .WorkbenchBody) expands to fill the
+ * freed space. Expanded by default (192px).
+ */
+.Workbench {
+  --nodes-library-height: 192px;
+}
+
+.Workbench[data-nodes-library='collapsed'] {
+  --nodes-library-height: 30px;
+}
+
+.ActionStepsBar {
+  flex-shrink: 0;
+  height: var(--nodes-library-height);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-2);
+  /* Smoothly animate the height when collapsing/expanding so the canvas grows
+   * and shrinks fluidly rather than snapping. */
+  transition: height 0.24s ease;
+}
+
+.ActionStepsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px 5px;
+  flex-shrink: 0;
+}
+
+.ActionStepsTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--bolt-elements-textSecondary);
+}
+
+/*
+ * Groups the "N nodes" count + the collapse caret together on the header's
+ * right side. The caret is the primary toggle; the count is just a label.
+ */
+.ActionStepsHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ActionStepsCount {
+  font-size: 10px;
+  color: var(--bolt-elements-textTertiary);
+}
+
+/*
+ * LibraryCollapseToggle — the simple caret-arrow button in the top-right of
+ * the nodes library header. Clicking collapses the whole library panel down
+ * (hides the scroll area, the bar shrinks to header-only, the canvas above
+ * grows to fill the freed space). The icon is swapped in JS (caret-down when
+ * expanded, caret-up when collapsed) so this button just provides the chrome:
+ * a small squircle icon button matching the header's other icon buttons.
+ */
+.LibraryCollapseToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-1);
+  color: var(--bolt-elements-textSecondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background-color: rgba(var(--scheme-accent-rgb), 0.12);
+    color: var(--scheme-accent);
+    border-color: rgba(var(--scheme-accent-rgb), 0.55);
+  }
+
+  &:active {
+    transform: scale(0.94);
+  }
+}
+
+/*
+ * The scroll wrap is a flex row: [left btn] [scrollable area] [right btn].
+ * Buttons are inline flex items (not absolutely positioned) so they sit
+ * naturally on the left and right of the scroll area, vertically centered.
+ * Horizontal padding + max-width constrain the scroll area so it doesn't
+ * span the full panel width.
+ */
+.ActionStepsScrollWrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 0 6px 8px;
+  max-width: 100%;
+}
+
+/*
+ * When the workbench is in the collapsed state, hide the entire scroll wrap
+ * (the cards row + left/right scroll buttons). The bar shrinks to just the
+ * header row, and the canvas above expands to fill the freed space. The
+ * transition on .ActionStepsBar's height provides the smooth collapse/expand
+ * animation; this visibility flip happens instantly once the height animation
+ * completes its visual effect (the wrap is already gone from view by then).
+ */
+.Workbench[data-nodes-library='collapsed'] {
+  .ActionStepsScrollWrap {
+    display: none;
+  }
+}
+
+.ActionStepsScroll {
+  flex: 1;
+  /*
+   * min-width: 0 is the critical flexbox fix for scroll containers. Without
+   * it, a flex item's default min-width (auto) prevents it from shrinking
+   * below its content's intrinsic size — so the scroll area would expand to
+   * fit all cards instead of staying within its flex-allocated space and
+   * scrolling. This was causing the scroll to overlap the arrow buttons.
+   */
+  min-width: 0;
+  display: flex;
+  /*
+   * align-items: stretch makes every card fill the row's cross-axis height
+   * (which equals the tallest card's natural height). Previously this was
+   * `center`, which left each card at its own content height — so cards
+   * without a detail line (s3 onward) rendered shorter than the first two
+   * (s1/s2) that have a detail line. Stretching unifies them to the same
+   * height as the first two boxes.
+   */
+  align-items: stretch;
+  gap: 8px;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * Section divider — a thin vertical column that separates the nodes library
+ * into horizontal sections (Trigger node / AI / Utility node). Each divider
+ * sits at the left of its section's group of cards, stretches to the full
+ * row height (so it aligns with the cards), and contains a small accent icon
+ * at the top and the section label written vertically below it.
+ */
+.SectionDivider {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 26px;
+  height: 100%;
+  max-height: 148px;
+  padding: 10px 0;
+  margin-right: 4px;
+}
+
+.SectionDividerIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background-color: rgba(var(--scheme-accent-rgb), 0.12);
+  color: var(--scheme-accent);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.SectionDividerLabel {
+  /*
+   * writing-mode: vertical-rl renders the label top-to-bottom along the
+   * divider column, so the section name reads vertically beside its cards.
+   *
+   * line-height: 1 + a compact font-size keeps each glyph's vertical advance
+   * tight, so even the longest short-label ("Utility", 7 chars) fits inside
+   * the divider's available height in a SINGLE column. Previously the labels
+   * were uppercase + wide letter-spacing, which made them overflow and wrap
+   * into a second column — the overlapping "line in line" effect.
+   */
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--bolt-elements-textTertiary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/*
+ * Scroll buttons — bold "mechanical key" style buttons. Solid-filled with a
+ * 3D press effect: each button has a chunky bottom shadow that simulates the
+ * key's height, and on press the shadow collapses so the button appears to
+ * sink down — like pressing a physical keyboard key. On hover the fill
+ * brightens and the icon scales up slightly.
+ *
+ * These are inline flex items (not absolutely positioned) so they sit
+ * naturally on the left and right of the scrollable area, vertically
+ * centered alongside the node cards.
+ */
+.ScrollBtn {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--bolt-elements-bg-depth-3);
+  color: var(--bolt-elements-textPrimary);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  /* The "key height" — a solid bottom border that creates the 3D depth. */
+  box-shadow:
+    0 4px 0 0 var(--bolt-elements-bg-depth-1),
+    0 6px 10px rgba(0, 0, 0, 0.4);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease,
+    background-color 0.14s ease,
+    color 0.14s ease;
+
+  /* The chevron icon inside — scales up on hover for emphasis. */
+  > span {
+    transition: transform 0.14s ease;
+  }
+
+  &:hover:not(:disabled) {
+    background-color: var(--scheme-accent);
+    color: var(--scheme-accent-contrast, #fff);
+
+    > span {
+      transform: scale(1.2);
+    }
+  }
+
+  &:active:not(:disabled) {
+    /* Press: collapse the 3D depth so the key sinks down. */
+    transform: translateY(4px);
+    box-shadow:
+      0 1px 0 0 var(--bolt-elements-bg-depth-1),
+      0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    box-shadow:
+      0 4px 0 0 var(--bolt-elements-bg-depth-1),
+      0 6px 10px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.ActionStepCard {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 176px;
+  height: 100%;
+  max-height: 148px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-1);
+  transition: all 0.15s ease;
+
+  &:hover {
+    border-color: rgba(var(--scheme-accent-rgb), 0.5);
+    transform: translateY(-1px);
+  }
+
+  &.status_done {
+    .ActionStepIcon {
+      color: var(--scheme-accent);
+    }
+  }
+
+  &.status_running {
+    border-color: rgba(var(--scheme-accent-rgb), 0.45);
+    background-color: rgba(var(--scheme-accent-rgb), 0.07);
+  }
+
+  &.status_queued {
+    opacity: 0.55;
+  }
+
+  &.status_failed {
+    border-color: #ef4444;
+
+    .ActionStepIcon {
+      color: #ef4444;
+    }
+  }
+}
+
+.ActionStepIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background-color: var(--bolt-elements-bg-depth-2);
+  font-size: 18px;
+  color: var(--bolt-elements-textSecondary);
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.ActionStepBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ActionStepTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--bolt-elements-textPrimary);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ActionStepDetail {
+  font-size: 10.5px;
+  color: var(--bolt-elements-textTertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ActionStepStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+
+  .status_done & {
+    color: var(--scheme-accent);
+    background-color: rgba(var(--scheme-accent-rgb), 0.12);
+  }
+
+  .status_running & {
+    color: var(--scheme-accent);
+    background-color: rgba(var(--scheme-accent-rgb), 0.12);
+  }
+
+  .status_queued & {
+    color: var(--bolt-elements-textTertiary);
+    background-color: var(--bolt-elements-bg-depth-2);
+  }
+
+  .status_failed & {
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.12);
+  }
+}
+
+.ActionStepStatusIcon {
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+}
+
+.spin {
+  animation: wbk-spin 1s linear infinite;
+}
+
+@keyframes wbk-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Drag-and-drop: library → canvas ────────────────────────────────────── */
+
+/*
+ * DraggableCard — makes a library ActionStepCard grabbable. Applied alongside
+ * .ActionStepCard. `touch-action: none` stops touch-drag from scrolling the
+ * library row; `user-select: none` stops text selection during a drag.
+ */
+.DraggableCard {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+/*
+ * The source card while it is actively being dragged — dimmed + slightly
+ * shrunk so it reads as "lifted off" while the DragGhost follows the cursor.
+ */
+.DraggableCardDragging {
+  opacity: 0.35;
+  transform: scale(0.97);
+  pointer-events: none;
+}
+
+/*
+ * DragGhost — the floating preview that follows the cursor during a drag.
+ * Fixed-positioned at the pointer (offset by the grab point), floats above
+ * everything, and never intercepts pointer events (so the canvas underneath
+ * still receives the drop). A slight tilt + drop-shadow give it a "lifted"
+ * feel; the spring transition (set in JS) makes it pop in/out smoothly.
+ */
+.DragGhost {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 188px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-2);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.45),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  transform-origin: 20% 20%;
+  /*
+   * A subtle constant tilt so the ghost reads as a "dragged" object rather
+   * than a static card. The JS spring transition animates scale/opacity; the
+   * tilt is applied here via a separate transform on a wrapper-free element
+   * (motion.div merges its own transform, so we lean on box-shadow + scale
+   * for the lifted effect instead of a CSS rotate that would fight motion).
+   */
+}
+
+/*
+ * When the ghost is over the canvas, ring it in the accent colour so the user
+ * knows releasing will drop the node here.
+ */
+.DragGhostOverCanvas {
+  border-color: var(--scheme-accent);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.45),
+    0 0 0 2px rgba(var(--scheme-accent-rgb), 0.35),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.DragGhostIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background-color: var(--bolt-elements-bg-depth-1);
+  font-size: 17px;
+  color: var(--scheme-accent);
+}
+
+.DragGhostBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.DragGhostTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--bolt-elements-textPrimary);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.DragGhostDetail {
+  font-size: 10.5px;
+  color: var(--bolt-elements-textTertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * MovableCanvasDropTarget — while a library node is dragged over the canvas,
+ * ring the canvas in the accent colour to signal it's a valid drop zone.
+ * Uses an inset box-shadow so it overlays the dot-grid without needing a
+ * border (the canvas has none).
+ */
+.MovableCanvasDropTarget {
+  box-shadow: inset 0 0 0 2px rgba(var(--scheme-accent-rgb), 0.55);
+  cursor: copy;
+}
+
+/*
+ * CanvasNodesLayer — the transformed container for all placed nodes. It is
+ * translated by pan and scaled by zoom (origin 0 0) so nodes stay glued to the
+ * dot-grid. Zero-sized (width/height 0) with overflow visible so absolutely
+ * positioned children escape it freely; pointer-events disabled so clicks on
+ * empty canvas pass through to the background panner.
+ */
+.CanvasNodesLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/*
+ * CanvasNode — a node instance placed on the canvas. Absolutely positioned at
+ * its canvas-space {left, top}. Re-enables pointer events so it can be grabbed
+ * and moved independently of the canvas pan. Springs in on mount (framer-motion
+ * handles the entrance; here we define the resting look + hover/active states).
+ */
+.CanvasNode {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 148px;
+  padding: 10px 10px 9px;
+  border-radius: 11px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-2);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.28),
+    0 1px 3px rgba(0, 0, 0, 0.2);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    border-color: rgba(var(--scheme-accent-rgb), 0.55);
+    box-shadow:
+      0 8px 22px rgba(0, 0, 0, 0.34),
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 0.25);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+/*
+ * CanvasNodeSelected — the selection ring applied to every node currently in
+ * the selection set (Shift+click toggles membership). A bright accent-colored
+ * ring (outline) layered into the box-shadow so it doesn't affect layout, plus
+ * a slightly brighter border. The ring sits OUTSIDE the card's normal border
+ * (3px ring) so it reads clearly against the dark canvas regardless of the
+ * node kind's own border colour. Sticky notes (which carry an inline
+ * background/border) keep their tint — only the ring is added.
+ *
+ * The ring is driven by a class (not a pseudo-class) because the selection
+ * state lives in a store and is toggled by Shift+click, not by hover/focus —
+ * applying it via className lets each CanvasNodeItem subscribe to the
+ * selection store and re-render only when its own membership changes.
+ */
+.CanvasNodeSelected {
+  border-color: rgba(var(--scheme-accent-rgb), 1) !important;
+  box-shadow:
+    0 0 0 3px rgba(var(--scheme-accent-rgb), 0.55),
+    0 0 0 1px rgba(var(--scheme-accent-rgb), 1),
+    0 8px 22px rgba(0, 0, 0, 0.4) !important;
+}
+
+/*
+ * CanvasNodeRunning — applied to the node currently "executing" during a
+ * Run-button automation walk. A pulsing accent ring (animated box-shadow) +
+ * a bright accent fill wash so the node visibly lights up as the automation
+ * flows through the graph in execution order. The pulse is a 1s ease-in-out
+ * infinite animation (alternating ring widths + opacity) so the node reads as
+ * "actively running" rather than just selected.
+ *
+ * Coexists with CanvasNodeSelected (a node can be both selected + running); the
+ * running pulse stacks ABOVE the selection ring via a larger ring size.
+ */
+@keyframes CanvasNodeRunningPulse {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(var(--scheme-accent-rgb), 0.4),
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 1),
+      0 0 14px 2px rgba(var(--scheme-accent-rgb), 0.55),
+      0 8px 22px rgba(0, 0, 0, 0.4);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 5px rgba(var(--scheme-accent-rgb), 0.65),
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 1),
+      0 0 20px 4px rgba(var(--scheme-accent-rgb), 0.85),
+      0 8px 22px rgba(0, 0, 0, 0.4);
+  }
+
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(var(--scheme-accent-rgb), 0.4),
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 1),
+      0 0 14px 2px rgba(var(--scheme-accent-rgb), 0.55),
+      0 8px 22px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.CanvasNodeRunning {
+  border-color: rgba(var(--scheme-accent-rgb), 1) !important;
+  animation: CanvasNodeRunningPulse 1s ease-in-out infinite;
+  z-index: 5;
+}
+
+/*
+ * NodeSpinner — a circular rotating icon overlaid dead-centre on a node while
+ * it's the one currently executing (during a Run-button or chat-send
+ * automation walk). Inspired by n8n's active-node indicator: a light cyan/
+ * teal circular loader with two curved arrows in a refresh/sync pattern that
+ * rotates continuously. Positioned absolutely over the node's full surface,
+ * pointer-events:none so it never blocks interaction with the node beneath.
+ *
+ * The icon itself (i-ph:arrows-clockwise) is the two-curved-arrows refresh
+ * glyph; the spin animation rotates the whole element 360° every 0.8s linear
+ * for a smooth, continuous rotation. The icon sits inside a semi-opaque dark
+ * disc so it reads against any node body (dark or light).
+ */
+.NodeSpinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+
+  /* Semi-opaque dark backdrop so the spinner reads against any node body. */
+  & > span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: rgba(15, 23, 42, 0.75);
+    /* Light cyan/teal spinner — high contrast against the dark disc. */
+    color: #5eead4;
+    font-size: 20px;
+    /* The continuous rotation — 0.8s linear infinite for a smooth spin. */
+    animation: NodeSpinnerSpin 0.8s linear infinite;
+    box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.3), 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@keyframes NodeSpinnerSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.CanvasNodeIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background-color: var(--bolt-elements-bg-depth-1);
+  font-size: 17px;
+  color: var(--scheme-accent);
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.CanvasNodeTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--bolt-elements-textPrimary);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.CanvasNodeDetail {
+  font-size: 10.5px;
+  color: var(--bolt-elements-textTertiary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Trigger node variant ─────────────────────────────────────────────────
+ * Trigger nodes (the nodes that start a workflow) render as a single-colour
+ * DARK icon "chip": one solid dark background, one uniform border colour —
+ * no two-tone split. The icon is centred inside the card. The title text
+ * lives OUTSIDE the card, below it, as a separate caption.
+ *
+ * A red lightning-bolt badge straddles the left edge; a circular output port
+ * sits centred on the right edge.
+ *
+ * Shape: the LEFT corners are smoothly curved and the RIGHT corners are only
+ * very lightly curved (4px) at the tip. overflow:visible so the bolt + port
+ * can extend past the card edge AND so the outside title caption can render
+ * below the card without being clipped.
+ */
+.CanvasNodeTrigger {
+  width: 64px;
+  padding: 0;
+  overflow: visible;
+  /* top-left  top-right  bottom-right  bottom-left.
+   * Left side is smoothly curved; right side is only very lightly curved
+   * (4px) right at the tip so the right edge still reads as essentially square. */
+  border-radius: 18px 4px 4px 18px;
+  /* Permanent accent outline — the outline that previously only appeared on
+   * hover is now ALWAYS visible on every dropped trigger node. The border
+   * itself is the accent colour (at 0.6 opacity), reinforced by a 1px accent
+   * ring layered into the box-shadow. The card body stays #171717. */
+  border: 1px solid rgba(var(--scheme-accent-rgb), 0.6);
+  background-color: #171717;
+  box-shadow:
+    0 0 0 1px rgba(var(--scheme-accent-rgb), 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.35);
+
+  &:hover {
+    /* Intensify the permanent outline on hover (brighter border + ring). */
+    border-color: rgba(var(--scheme-accent-rgb), 0.9);
+    box-shadow:
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 0.55),
+      0 8px 22px rgba(0, 0, 0, 0.5),
+      0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+
+  /*
+   * The delete (×) button sits over the dark card, so use a light glyph on a
+   * translucent light chip for contrast against the dark background.
+   */
+  .CanvasNodeDelete {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+
+    &:hover {
+      background-color: #ef4444;
+      color: #fff;
+    }
+  }
+}
+
+/*
+ * TriggerIconArea — the card body. Now the WHOLE card is just this one area:
+ * a single solid dark background with a centred icon. There is no separate
+ * title section inside the card anymore — the title moved outside/below.
+ * Square aspect so the icon sits dead-centre in a compact dark chip.
+ */
+.TriggerIconArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  /* Match the card's silhouette: left smoothly curved, right lightly curved. */
+  border-radius: 17px 3px 3px 17px;
+  /* Same dark as the card — single colour, no two-tone. */
+  background-color: transparent;
+  font-size: 24px;
+  color: #e5e7eb;
+}
+
+/*
+ * TriggerTitle — the node's label. Sits OUTSIDE the card, below it, as a
+ * separate caption — not inside the card body. Absolutely positioned relative
+ * to the card wrapper so it doesn't affect the card's box and stays centred
+ * under it. Light text so it reads against the dark canvas background.
+ */
+.TriggerTitle {
+  position: absolute;
+  left: 50%;
+  /* Just below the card edge, with a small gap. */
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: 120px;
+  padding: 0 4px;
+  background-color: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  color: #e5e7eb;
+  word-break: break-word;
+  hyphens: auto;
+  pointer-events: none;
+  white-space: normal;
+}
+
+/*
+ * TriggerBolt — the red "instant trigger" badge. A solid red circle with a
+ * white lightning bolt, straddling the card's left edge and centred vertically
+ * on the square card body. A thin ring in the card's colour (#171717) separates
+ * it from the card edge so the red badge reads cleanly against the card.
+ */
+.TriggerBolt {
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  box-shadow:
+    0 0 0 2px #171717,
+    0 2px 5px rgba(0, 0, 0, 0.45);
+  color: #ffffff;
+  font-size: 11px;
+}
+
+/*
+ * TriggerPort — the output connector knob on the right edge. A solid circle
+ * straddling the edge, vertically centred on the card body. Light-coloured so
+ * it shows up against the dark card. Its border uses the card's colour (#171717)
+ * so the port blends into the card edge. Triggers are the start of a workflow,
+ * so they have a single output port (no input port).
+ */
+.TriggerPort {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #9ca3af;
+  border: 2px solid #171717;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/*
+ * CanvasNodePreviewTrigger — the dashed drop-preview variant for trigger
+ * nodes. Keeps the same two-section layout + left-rounded silhouette but mutes
+ * it (translucent fill, dashed accent ring) so it reads as a placeholder while
+ * dragging.
+ */
+.CanvasNodePreviewTrigger {
+  width: 64px;
+  padding: 0;
+  overflow: visible;
+  /* Match the placed card: left corners curved, right corners lightly curved. */
+  border-radius: 18px 4px 4px 18px;
+  border: 1.5px dashed rgba(var(--scheme-accent-rgb), 0.7);
+
+  .TriggerIconArea {
+    background-color: rgba(var(--scheme-accent-rgb), 0.12);
+    color: var(--scheme-accent);
+  }
+
+  .TriggerTitle {
+    background-color: transparent;
+    color: var(--scheme-accent);
+  }
+
+  .TriggerBolt,
+  .TriggerPort {
+    opacity: 0.55;
+  }
+}
+
+/* ── Agent node variant ───────────────────────────────────────────────────
+ * Agent nodes are a DISTINCT shape + layout from trigger nodes. They share
+ * ONLY two things with the trigger: the same HEIGHT (64px) and the same
+ * permanent accent outline.
+ *
+ * Otherwise the agent is its own design:
+ *   - WIDE rectangle (168px × 64px) — wider than the trigger's 64px square.
+ *   - ALL FOUR corners are lightly curved (4px uniform) — the same tiny radius
+ *     the trigger uses on its upper-right & bottom-right corners, applied to
+ *     every corner so the card reads as a uniformly soft rectangle.
+ *   - Same dark #171717 body + permanent accent outline as the trigger.
+ *   - NO red lightning-bolt badge (an agent isn't an instant trigger).
+ *   - HORIZONTAL internal layout: icon on the LEFT, two-line text block on the
+ *     RIGHT ("AI Agent" main label + "tool agent" subtitle). The text lives
+ *     INSIDE the card (not below as a caption like the trigger).
+ *   - Output connector port on the right edge (shared chrome).
+ */
+.CanvasNodeAgent {
+  width: 168px;
+  padding: 0;
+  overflow: visible;
+  /* All four corners lightly curved (4px) — uniform, like the trigger's right corners. */
+  border-radius: 4px;
+  /* Permanent accent outline — same treatment as the trigger. */
+  border: 1px solid rgba(var(--scheme-accent-rgb), 0.6);
+  background-color: #171717;
+  box-shadow:
+    0 0 0 1px rgba(var(--scheme-accent-rgb), 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.35);
+
+  &:hover {
+    border-color: rgba(var(--scheme-accent-rgb), 0.9);
+    box-shadow:
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 0.55),
+      0 8px 22px rgba(0, 0, 0, 0.5),
+      0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Light glyph on translucent chip — same as trigger, for contrast on dark. */
+  .CanvasNodeDelete {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+
+    &:hover {
+      background-color: #ef4444;
+      color: #fff;
+    }
+  }
+}
+
+/* ── Action / utility node variant ─────────────────────────────────────────
+ * The default 'action' kind — used by every utility node (HTTP Request,
+ * Delay, Condition, Set Variable, …) dropped from the "Utility" section of the
+ * nodes library. Re-themed to a true SQUARE silhouette that matches the
+ * trigger node's 64×64 footprint, so every utility node reads as part of the
+ * same dark-squared family as the trigger + agent nodes:
+ *   - 64×64 SQUARE (width === height) — same footprint as the trigger node.
+ *   - LIGHTLY curved corners (border-radius:4px, uniform on all four sides) —
+ *     the "square but lightly corners are curved" look the user asked for.
+ *   - Dark #171717 body (same hard-coded dark as the agent/trigger card).
+ *   - Permanent accent outline (border + 1px accent ring in the box-shadow),
+ *     intensifying on hover — identical treatment to the agent + trigger card.
+ *   - Icon centred dead-centre in the square; the title renders as a caption
+ *     BELOW the card (mirrors the trigger + memory node caption layout).
+ *   - overflow:visible so the outside title caption (below) renders without
+ *     being clipped by the square.
+ */
+.CanvasNodeAction {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: visible;
+  /* All four corners lightly curved (4px) — square with softly rounded corners. */
+  border-radius: 4px;
+  /* Permanent accent outline — same treatment as the agent + trigger card. */
+  border: 1px solid rgba(var(--scheme-accent-rgb), 0.6);
+  background-color: #171717;
+  box-shadow:
+    0 0 0 1px rgba(var(--scheme-accent-rgb), 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.35);
+
+  &:hover {
+    border-color: rgba(var(--scheme-accent-rgb), 0.9);
+    box-shadow:
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 0.55),
+      0 8px 22px rgba(0, 0, 0, 0.5),
+      0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Light glyph on translucent chip — same as agent/trigger, for contrast on dark. */
+  .CanvasNodeDelete {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+
+    &:hover {
+      background-color: #ef4444;
+      color: #fff;
+    }
+  }
+}
+
+/*
+ * ActionIconArea — the icon area filling the whole 64×64 square of an
+ * action/utility card. The icon glyph sits dead-centre (no chip background —
+ * transparent on the dark body, same as the trigger's .TriggerIconArea). The
+ * glyph uses the light #e5e7eb so it reads cleanly on the dark square.
+ */
+.ActionIconArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background-color: transparent;
+  font-size: 24px;
+  color: #e5e7eb;
+}
+
+/*
+ * ActionTitle — the title caption rendered OUTSIDE / below the square card
+ * (mirrors the trigger + memory node caption layout). Centred under the card,
+ * 120px wide so long titles wrap onto two lines instead of overflowing. Light
+ * text on the transparent canvas background; pointer-events:none so the
+ * caption never intercepts a drag.
+ */
+.ActionTitle {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: 120px;
+  padding: 0 4px;
+  background-color: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  color: #e5e7eb;
+  word-break: break-word;
+  hyphens: auto;
+  pointer-events: none;
+  white-space: normal;
+}
+
+/* ActionDetail — retained for backward-compat but unused in the square layout
+ * (the square card shows only an icon + a caption below; there's no room for a
+ * secondary detail line). Kept here so any stray reference doesn't blow up. */
+.ActionDetail {
+  display: none;
+}
+
+/* ActionTextBlock — retained for backward-compat but unused in the square
+ * layout (the square card has no horizontal text block anymore). Kept here so
+ * any stray reference doesn't blow up. */
+.ActionTextBlock {
+  display: none;
+}
+
+/* CanvasNodePreviewAction — the dashed drop-preview variant for utility/action
+ * nodes. Keeps the same 64×64 square + 4px-radius silhouette as the placed
+ * card but mutes it (translucent fill, dashed accent ring) so it reads as a
+ * placeholder while dragging. The inner ActionIconArea inherits the dark body
+ * via the translucent overlay. */
+.CanvasNodePreviewAction {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: visible;
+  border-radius: 4px;
+  border: 1.5px dashed rgba(var(--scheme-accent-rgb), 0.7);
+  background-color: rgba(23, 23, 23, 0.55);
+
+  .ActionIconArea {
+    background-color: transparent;
+    color: var(--scheme-accent);
+  }
+
+  .ActionTitle {
+    color: var(--scheme-accent);
+  }
+}
+
+/* ── Memory node variant ──────────────────────────────────────────────────
+ * Memory nodes render as a perfect CIRCLE — distinct from the trigger's
+ * square and the agent's wide rectangle. Same 64×64 footprint as the trigger
+ * (so it reads as a compact icon node), but border-radius:50% makes the card a
+ * round disc. Same dark #171717 body + permanent accent outline + output port
+ * on the right edge as the trigger, but NO red bolt badge. The memory icon
+ * sits dead-centre; the title caption renders OUTSIDE / below the circle.
+ *
+ * overflow:visible so the output port (straddling the right edge) and the
+ * outside title caption (below) render without being clipped by the circle.
+ */
+/* Shared by .CanvasNodeMemory AND .CanvasNodeLlm — both are 64×64 CIRCLES with
+ * the dark body, accent outline, top-anchored output port, and outside title
+ * caption. They differ only in icon + connection target, not in card chrome,
+ * so the rules are grouped. */
+.CanvasNodeMemory,
+.CanvasNodeLlm {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: visible;
+  /* Perfect circle. */
+  border-radius: 50%;
+  /* Permanent accent outline — same treatment as the trigger + agent. */
+  border: 1px solid rgba(var(--scheme-accent-rgb), 0.6);
+  background-color: #171717;
+  box-shadow:
+    0 0 0 1px rgba(var(--scheme-accent-rgb), 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.35);
+
+  &:hover {
+    border-color: rgba(var(--scheme-accent-rgb), 0.9);
+    box-shadow:
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 0.55),
+      0 8px 22px rgba(0, 0, 0, 0.5),
+      0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Light glyph on translucent chip — same as trigger + agent, for contrast
+   * on the dark disc. */
+  .CanvasNodeDelete {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+
+    &:hover {
+      background-color: #ef4444;
+      color: #fff;
+    }
+  }
+
+  /* Circular node output port — repositioned from the right edge (the trigger/
+   * agent default) to the TOP edge, centred horizontally so it sits at the
+   * topmost point of the circle. This makes the node's outgoing wire leave from
+   * the top, so a node placed BELOW an agent connects upward into one of the
+   * agent's bottom diamonds (memory → first diamond, llm → second diamond). */
+  .TriggerPort {
+    right: auto;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  /* The interactive OutputPort hover/active scales build on the base
+   * transform; override them to use translateX(-50%) (not translateY) so the
+   * scale stays centred on the top-anchored port. */
+  .OutputPort:hover {
+    transform: translateX(-50%) scale(1.25);
+  }
+
+  .OutputPort:active {
+    transform: translateX(-50%) scale(1.1);
+  }
+}
+
+/*
+ * MemoryIconArea — the circular card body. A 64×64 flex container that centres
+ * the memory/storage icon dead-centre in the disc. background:transparent so
+ * the card's #171717 fill shows through (single-colour, like the trigger).
+ * border-radius:50% matches the card so the body's hit area is the disc itself.
+ */
+.MemoryIconArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: transparent;
+  font-size: 24px;
+  color: #e5e7eb;
+}
+
+/*
+ * AgentLeftBar — a LIGHT vertical rectangle straddling the agent card's LEFT
+ * edge, vertically centred. The agent node's left-side accent marker — the
+ * analog of the trigger's red bolt badge, but a tall thin light bar instead of
+ * a red circle.
+ *
+ * "Light in the node + lightly out of the node": the bar is centred on the
+ * card's left edge so roughly half of it sits INSIDE the dark card body (light
+ * fill visible against the dark) and half sits OUTSIDE the card (extending into
+ * the canvas). A thin dark ring (#171717, matching the card body) separates the
+ * bar from the card edge so the light fill reads cleanly where it overlaps the
+ * card. Rounded corners on the left/outside end so the protruding portion reads
+ * as a soft pill, not a sharp slab.
+ */
+.AgentLeftBar {
+  position: absolute;
+  /* Centre vertically on the 64px card body. */
+  top: 50%;
+  transform: translateY(-50%);
+  /* Straddle the left edge: left: -3px puts ~half the 6px-wide bar outside the
+   * card (into the canvas) and ~half inside it. */
+  left: -3px;
+  z-index: 2;
+  /* Vertical rectangle: 6px wide × 19px tall. */
+  width: 6px;
+  height: 19px;
+  /* Soft pill on the outside (left) end; flat on the inside (right) end so the
+   * inside edge blends flush with the card body. */
+  border-radius: 3px 0 0 3px;
+  /* Light fill so it shows against the dark card body. */
+  background-color: #e5e7eb;
+  /* Thin ring in the card body's colour separates the bar from the card edge
+   * where they overlap, so the light fill reads cleanly. */
+  box-shadow:
+    0 0 0 1px #171717,
+    0 1px 3px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/*
+ * AgentBottomDiamonds — a non-layout container for the three decorative
+ * diamonds that straddle the agent card's BOTTOM edge. The container itself
+ * is a zero-size anchor pinned to the card's bottom-left corner; each diamond
+ * is positioned absolutely relative to it. pointer-events:none so the diamonds
+ * never intercept node drags or connection hit-testing (the whole card remains
+ * the drop target via [data-canvas-node-id]).
+ */
+.AgentBottomDiamonds {
+  position: absolute;
+  /* Span the full card width (left:0 + right:0) so children using `right:`
+   * are positioned relative to the CARD's right edge, not a zero-width
+   * container's right edge. height:0 keeps it out of the card's flex layout. */
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/*
+ * AgentDiamond — the base diamond shape. A small 8×8 square rotated 45° so it
+ * reads as a diamond, straddling the card's bottom edge (bottom: -4px puts
+ * roughly half the diamond outside the card and half inside it). Light fill
+ * (#e5e7eb) + a thin dark ring (#171717, matching the card body) so the light
+ * fill reads cleanly where it overlaps the card — the same treatment as
+ * .AgentLeftBar. A subtle drop-shadow gives it depth against the canvas.
+ *
+ * A 1px border-radius softens the diamond's tips just enough to keep it from
+ * looking razor-sharp at small sizes (pure 45° squares can look harsh at 8px).
+ */
+.AgentDiamond {
+  position: absolute;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background-color: #e5e7eb;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  box-shadow:
+    0 0 0 1px #171717,
+    0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * The three diamond positions across the 168px-wide card bottom:
+ *   - Left  → left: 14px (aligned roughly under the icon area) — the FIRST
+ *     diamond, now the LLM node's connection target.
+ *   - Right outer → right: 14px (the rightmost / THIRD diamond, near the card's
+ *     right edge) — purely decorative; a vertical tail + plus-square hang off
+ *     it (see .AgentDiamondTail / .AgentPlusSquare below).
+ *   - Right inner → right: 36px (the SECOND / middle diamond) — the MEMORY
+ *     node's connection target. Shifted slightly LEFT of its original
+ *     right:28px spot so the two right-side diamonds read as a tighter pair
+ *     and the memory wire clears the llm wire on the first diamond.
+ */
+.AgentDiamondLeft {
+  left: 14px;
+}
+
+.AgentDiamondRightOuter {
+  right: 14px;
+}
+
+.AgentDiamondRightInner {
+  right: 36px;
+}
+
+/*
+ * AgentDiamondTail — a thin vertical line dropping straight DOWN from the THIRD
+ * (rightmost) diamond's bottom tip. Centre-aligned with the AgentDiamondRightOuter
+ * (right:14px → diamond centre at right:18px), so the 2px-wide tail sits at
+ * right:17px (18 - 1). Spans from the diamond's bottom tip (4px below the card)
+ * down 14px (bottom:-18px → top edge at -4px, bottom edge at -18px), leading
+ * into the plus-square below. Same light fill + dark ring treatment as the
+ * diamonds so it reads as part of the same accent set.
+ */
+.AgentDiamondTail {
+  position: absolute;
+  right: 17px;
+  bottom: -18px;
+  width: 2px;
+  height: 14px;
+  background-color: #e5e7eb;
+  box-shadow: 0 0 0 1px #171717;
+  border-radius: 1px;
+}
+
+/*
+ * AgentPlusSquare — a small square-outline chip with a + glyph centred inside,
+ * terminating the tail line below the third diamond. Reads as an "add a node
+ * here" affordance. 14×14, 1px light border on the dark card-body fill, so the
+ * light + glyph reads cleanly. Centre-aligned with the tail/diamond (centre at
+ * right:18px → right edge at right:11px for a 14px-wide box). Sits immediately
+ * below the tail (bottom:-32px → top edge at -18px meeting the tail's bottom).
+ */
+.AgentPlusSquare {
+  position: absolute;
+  right: 11px;
+  bottom: -32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid #e5e7eb;
+  background-color: #171717;
+  color: #e5e7eb;
+  font-size: 10px;
+  line-height: 1;
+  box-shadow:
+    0 0 0 1px #171717,
+    0 1px 3px rgba(0, 0, 0, 0.45);
+
+  /* The Phosphor + glyph fills the square. */
+  > span {
+    display: block;
+  }
+}
+
+/*
+ * AgentBody — the horizontal inner layout of an agent card. A flex row: icon
+ * area on the left, text block on the right. Fills the full 168×64 card with a
+ * small internal padding so the icon + text breathe inside the dark body.
+ */
+.AgentBody {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 168px;
+  height: 64px;
+  padding: 0 14px 0 12px;
+  /* Same uniform 4px corners as the card so the body fill matches the silhouette. */
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+/*
+ * AgentIconArea — the icon container on the LEFT side of the agent card. Holds
+ * the centred robot SVG icon, sized to sit comfortably next to the two-line
+ * text block within the 64px card height. NO square background fill — the icon
+ * renders directly on the dark card body (transparent background), as
+ * requested.
+ */
+.AgentIconArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  background-color: transparent;
+  font-size: 26px;
+  color: #e5e7eb;
+}
+
+/*
+ * AgentTextBlock — the two-line text column on the RIGHT side of the icon.
+ * Stacks the main label ("AI Agent") above the subtitle ("tool agent"). Left-
+ * aligned so both lines share a common left edge. Flex-shrink: 1 so it takes
+ * the remaining width after the icon + gap.
+ */
+.AgentTextBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 1px;
+}
+
+/* AgentMainLabel — the primary label "AI Agent". Bold, light text, single line. */
+.AgentMainLabel {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #f3f4f6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* AgentSubLabel — the subtitle "tool agent". Smaller, dimmer, single line. */
+.AgentSubLabel {
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/*
+ * CanvasNodePreviewAgent — the dashed drop-preview variant for agent nodes.
+ * Same wide 168px rectangle + uniform 4px corners as the placed card, but
+ * muted (translucent fill, dashed accent ring) so it reads as a placeholder.
+ */
+.CanvasNodePreviewAgent {
+  width: 168px;
+  padding: 0;
+  overflow: visible;
+  /* Uniform 4px corners — matches the placed agent card. */
+  border-radius: 4px;
+  border: 1.5px dashed rgba(var(--scheme-accent-rgb), 0.7);
+
+  .AgentIconArea {
+    background-color: transparent;
+    color: var(--scheme-accent);
+  }
+
+  .AgentLeftBar {
+    opacity: 0.55;
+  }
+
+  /* Dim the bottom diamonds (and the tail + plus-square hanging off the third
+   * diamond) in the preview too, matching the AgentLeftBar treatment, so they
+   * read as placeholder accents. */
+  .AgentDiamond,
+  .AgentDiamondTail,
+  .AgentPlusSquare {
+    opacity: 0.55;
+  }
+
+  .AgentMainLabel {
+    color: var(--scheme-accent);
+  }
+
+  .AgentSubLabel {
+    color: rgba(var(--scheme-accent-rgb), 0.7);
+  }
+
+  .TriggerPort {
+    opacity: 0.55;
+  }
+}
+
+/*
+ * Shared dashed drop-preview variant for memory AND llm nodes. Same 64×64
+ * circular footprint as the placed card, but a dashed accent ring + muted fill
+ * so it reads as a placeholder. Matches the trigger preview's treatment.
+ */
+.CanvasNodePreviewMemory,
+.CanvasNodePreviewLlm {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: visible;
+  /* Perfect circle — matches the placed card. */
+  border-radius: 50%;
+  border: 1.5px dashed rgba(var(--scheme-accent-rgb), 0.7);
+
+  .MemoryIconArea {
+    background-color: rgba(var(--scheme-accent-rgb), 0.12);
+    color: var(--scheme-accent);
+  }
+
+  .TriggerTitle {
+    background-color: transparent;
+    color: var(--scheme-accent);
+  }
+
+  .TriggerPort {
+    /* Top-anchored port (matches the placed card) + dimmed so it reads as a
+     * placeholder. */
+    right: auto;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0.55;
+  }
+}
+
+/*
+ * ── Sticky note node variant ──────────────────────────────────────────────
+ * Sticky notes are the ONLY resizable node kind and the only kind with an
+ * editable text surface. Distinct from every other kind:
+ *   - SHARP corners (border-radius:0) — the user explicitly requested sharp
+ *     corners so the note reads as a rectangular paper card, not a soft chip.
+ *   - Warm yellow paper colour (#fef08a body, #facc15 header) with dark ink
+ *     (#1f2937) — the classic Post-it palette.
+ *   - Width / height come from the node's own fields (set inline by
+ *     CanvasNodeItem), NOT from CSS — CSS only sets the min size here as a
+ *     floor. The resize handle in the bottom-right corner drives live width /
+ *     height updates via resizeCanvasNode().
+ *   - No output port, no accent outline, no glow — sticky notes are decorative
+ *     annotations, not part of the node graph.
+ *
+ * padding:0 because the inner StickyHeader + StickyTextarea manage their own
+ * padding; an outer padding would push the textarea past the sharp edge.
+ */
+.CanvasNodeSticky {
+  width: 200px;
+  height: 180px;
+  min-width: 100px;
+  min-height: 90px;
+  padding: 0;
+  /* SHARP corners — explicit 0 (overrides the .CanvasNode base's 11px radius). */
+  border-radius: 0;
+  border: 1px solid #ca8a04;
+  background-color: #fef08a;
+  /* Slightly warmer shadow so the note lifts off the dark canvas. */
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.32),
+    0 1px 3px rgba(0, 0, 0, 0.22);
+  /* Override the .CanvasNode base cursor:grab — sticky notes are still
+   * draggable (the parent motion.div still has the pointer handlers), so grab
+   * stays. But the textarea swaps it to text on hover. */
+  cursor: grab;
+  /* Hide the overflow so the dog-ear + resize handle stay clipped to the
+   * card's sharp rectangle. The textarea itself scrolls internally. */
+  overflow: hidden;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  /* The × delete button on a sticky note uses dark-on-light chrome (inverse of
+   * the dark-card variants). */
+  .CanvasNodeDelete {
+    background-color: rgba(0, 0, 0, 0.12);
+    color: #1f2937;
+
+    &:hover {
+      background-color: #ef4444;
+      color: #fff;
+    }
+  }
+}
+
+/*
+ * StickyHeader — the top strip of the note. Carries THREE things left-to-right:
+ *   1. A small note icon (decorative).
+ *   2. The EDITABLE title (an <input>) on the LEFT — the user can click + type
+ *      to rename the note. pointer-down on the input is stopped in JS so
+ *      editing never starts a drag.
+ *   3. The colour-picker CIRCLES on the RIGHT — one button per palette entry;
+ *      clicking re-tints the whole note. pointer-down on the picker is stopped
+ *      so clicking a circle never starts a drag either.
+ *
+ * The header strip ITSELF does not stop propagation — pressing on the empty
+ * parts of the strip (between / around the title + circles) bubbles to the
+ * parent CanvasNodeItem's onPointerDown, which starts a node MOVE. This makes
+ * the sticky note MOVABLE like every other node kind: grab the header to drag
+ * the note around the canvas.
+ *
+ * The header background + bottom-border colours are applied INLINE by the JS
+ * (from the active palette) so the strip re-tints instantly when the user
+ * picks a colour; the CSS values here are just the yellow fallback defaults.
+ */
+.StickyHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px;
+  background-color: #facc15;
+  border-bottom: 1px solid #eab308;
+  color: #1f2937;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.StickyHeader:active {
+  cursor: grabbing;
+}
+
+.StickyHeaderIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 12px;
+  color: #854d0e;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/*
+ * StickyHeaderTitle — the editable title input on the LEFT of the header.
+ * Styled to read as a plain label (transparent background, no border, no
+ * focus ring) until the user clicks in to edit. flex:1 so it grows to fill
+ * the space between the icon and the colour circles; min-width:0 so it can
+ * shrink + ellipsis instead of pushing the circles off the card.
+ */
+.StickyHeaderTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 18px;
+  padding: 0 4px;
+  border: none;
+  outline: none;
+  background-color: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+
+  &:focus {
+    outline: none;
+    background-color: rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+  }
+
+  &::placeholder {
+    color: currentColor;
+    opacity: 0.55;
+  }
+}
+
+/*
+ * StickyColorPicker — the row of colour circles on the RIGHT of the header.
+ * One button per palette entry (see STICKY_COLORS). Tight 2px gap so all six
+ * circles fit in a 200px-wide note's header alongside the icon + title.
+ * flex-shrink:0 so the circles never get squeezed when the title is long.
+ */
+.StickyColorPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/*
+ * StickyColorDot — a single colour swatch button. 12px circle filled with the
+ * palette's paper shade, bordered by the palette's border shade. The active
+ * colour (matching the note's current colour) gets a brighter, slightly larger
+ * ring (StickyColorDotActive) so the user can see which colour is selected at a
+ * glance. Hover lifts the dot so the picker reads as interactive.
+ */
+.StickyColorDot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1.5px solid;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+
+  &:hover {
+    transform: scale(1.18);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  }
+
+  &:active {
+    transform: scale(1.05);
+  }
+}
+
+.StickyColorDotActive {
+  border-width: 2px;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.3);
+  transform: scale(1.1);
+}
+
+/*
+ * StickyTextarea — the editable body of the note. Fills the remaining card
+ * height (flex:1 under the header). Transparent background so the note's
+ * yellow paper shows through; dark ink (#1f2937) for readability. No border,
+ * no outline, no resize handle (the card-level handle does the resizing) —
+ * the textarea is purely a text surface. The font is a slightly larger
+ * handwriting-friendly size with relaxed line-height so notes read like
+ * actual handwriting on paper.
+ *
+ * cursor:text overrides the parent card's cursor:grab so the user sees the
+ * I-beam when hovering the body (signalling "type here") and the grab hand
+ * only when hovering the header / edges.
+ */
+.StickyTextarea {
+  flex: 1 1 auto;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  outline: none;
+  background-color: transparent;
+  color: #1f2937;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: none;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+
+  &::placeholder {
+    color: #a16207;
+    opacity: 0.65;
+  }
+
+  &:focus {
+    outline: none;
+  }
+}
+
+/*
+ * StickyDogEar — a small triangular fold in the bottom-right corner, sitting
+ * UNDER the resize handle. Purely decorative (aria-hidden + pointer-events:
+ * none) — gives the note its classic "sticky" silhouette. Created via
+ * border-width triangle trick: a 0×0 box with a thick transparent top + left
+ * border and a solid #eab308 right + bottom border draws a right triangle in
+ * the bottom-right corner.
+ */
+.StickyDogEar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 16px 16px;
+  border-color: transparent transparent #eab308 transparent;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/*
+ * StickyResizeHandle — the bottom-right resize affordance. A 14×14 hit area
+ * with a custom diagonal-stripe cursor (nwse-resize). Sits ABOVE the dog-ear
+ * (z-index:2) so it always receives pointer events. The handle is invisible
+ * (transparent background) to keep the note's clean yellow surface — the
+ * cursor change is the only signal that the corner is grabbable. On hover a
+ * subtle 2px darker accent appears in the corner so the affordance is
+ * discoverable.
+ */
+.StickyResizeHandle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 2;
+  cursor: nwse-resize;
+  background-color: transparent;
+  /* Subtle hover affordance — a darker triangle appears in the corner when the
+   * user hovers, hinting that the corner is draggable. */
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.12);
+  }
+
+  &:active {
+    background-color: rgba(0, 0, 0, 0.2);
+  }
+}
+
+/*
+ * CanvasNodePreviewSticky — the dashed drop-preview variant for sticky notes.
+ * Sharp corners + warm-yellow tinted fill so the user recognises "this will
+ * land as a sticky note" while dragging. The preview's width / height are set
+ * inline by CanvasNodesLayer to match STICKY_DEFAULT_WIDTH / HEIGHT so the
+ * ghost matches the placed card's footprint.
+ */
+.CanvasNodePreviewSticky {
+  padding: 0;
+  border-radius: 0;
+  border: 1.5px dashed #ca8a04;
+  background-color: rgba(250, 204, 21, 0.25);
+  overflow: hidden;
+
+  .StickyHeader {
+    background-color: rgba(250, 204, 21, 0.45);
+    color: #854d0e;
+    border-bottom-color: rgba(202, 138, 4, 0.5);
+  }
+
+  .StickyHeaderIcon {
+    color: #854d0e;
+  }
+
+  .StickyTextarea {
+    color: #854d0e;
+  }
+}
+
+/*
+ * The × remove button in the node's top-right corner. Hidden by default,
+ * revealed on hover so placed nodes stay clean. Its pointerdown is stopped in
+ * JS so it never starts a node drag.
+ */
+.CanvasNodeDelete {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--bolt-elements-bg-depth-1);
+  color: var(--bolt-elements-textTertiary);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+
+  .CanvasNode:hover & {
+    opacity: 1;
+  }
+
+  &:hover {
+    background-color: #ef4444;
+    color: #fff;
+  }
+}
+
+/*
+ * CanvasNodePreview — the translucent "would land here" ghost shown while the
+ * pointer is over the canvas during a drag. Dashed border + low opacity so it
+ * reads as a placeholder, not a real node. Never receives pointer events.
+ */
+.CanvasNodePreview {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 148px;
+  padding: 10px;
+  border-radius: 11px;
+  border: 1.5px dashed rgba(var(--scheme-accent-rgb), 0.7);
+  background-color: rgba(var(--scheme-accent-rgb), 0.08);
+  opacity: 0.85;
+  animation: canvasNodePreviewPulse 1.1s ease-in-out infinite;
+
+  .CanvasNodeIcon {
+    background-color: transparent;
+    color: var(--scheme-accent);
+  }
+
+  .CanvasNodeTitle {
+    color: var(--scheme-accent);
+  }
+}
+
+@keyframes canvasNodePreviewPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/*
+ * CanvasEmptyHint — faint centered prompt shown when the canvas is empty and
+ * nothing is being dragged. Disappears once the first node lands or a drag
+ * starts. Centred via flex on the canvas (position absolute, inset 0).
+ */
+.CanvasEmptyHint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 1;
+  color: var(--bolt-elements-textTertiary);
+  text-align: center;
+  padding: 0 24px;
+}
+
+.CanvasEmptyHintIcon {
+  font-size: 30px;
+  opacity: 0.4;
+  animation: canvasEmptyHintBob 2.4s ease-in-out infinite;
+}
+
+.CanvasEmptyHintText {
+  font-size: 13px;
+  opacity: 0.5;
+  max-width: 280px;
+  line-height: 1.45;
+}
+
+@keyframes canvasEmptyHintBob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ *  Connections (edges) — port interactivity + edge rendering
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  Trigger nodes have an interactive OUTPUT port on their right edge (drag from
+ *  it to start a connection); agent nodes have an INPUT port on their left edge
+ *  (the visual landing point for incoming connections). Edges are rendered as
+ *  SVG bezier curves inside CanvasNodesLayer (so they pan/zoom with the nodes).
+ * ──────────────────────────────────────────────────────────────────────────
+ */
+
+/*
+ * OutputPort — interactive modifier layered on top of .TriggerPort. Same
+ * geometry (12px circle straddling the card's right edge, vertically centred),
+ * but reclaims pointer events + adds a "drag to connect" affordance: crosshair
+ * cursor on hover + a subtle scale + colour shift so the user can tell the port
+ * is grabbable (vs. the plain decorative port on action nodes / agent output).
+ *
+ * The :hover ring uses the scheme accent so the affordance matches the rest of
+ * the canvas's accent language. Pointer-down is handled in JS (OutputPort.tsx);
+ * here we only style the hover/active visuals.
+ */
+.OutputPort {
+  cursor: crosshair;
+  /* Slightly larger hit area than the visible circle so it's easy to grab:
+   * keep the visible 12px circle, but extend the pointer hit zone via a
+   * transparent pseudo-element ring around it. */
+  background-color: #9ca3af;
+  transition: transform 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+
+  &:hover {
+    background-color: #e5e7eb;
+    transform: translateY(-50%) scale(1.25);
+    box-shadow:
+      0 0 0 3px rgba(var(--scheme-accent-rgb), 0.35),
+      0 0 0 2px #171717,
+      0 2px 5px rgba(0, 0, 0, 0.45);
+  }
+
+  &:active {
+    transform: translateY(-50%) scale(1.1);
+  }
+}
+
+/*
+ * AgentInputPort — the input connector on the agent card's LEFT edge. Mirrors
+ * .TriggerPort's geometry (12px circle, vertically centred, straddling the
+ * edge) but anchored to the LEFT instead of the right. Light fill so it shows
+ * against the dark #171717 card body, with the same dark #171717 ring blending
+ * it into the card edge.
+ *
+ * Coexists visually with .AgentLeftBar (the decorative light vertical
+ * rectangle): the bar is 6px wide × 19px tall, the port is a 12px circle. Both
+ * are vertically centred on the left edge. The port renders AFTER the bar in
+ * the DOM (higher stacking order) so it sits in front of the bar's middle; the
+ * bar's tips peek ~3.5px above + below the port — reads as a "stem with a
+ * connector head".
+ *
+ * Higher z-index than the bar (3 vs 2) so the port always wins the overlap.
+ * Passive (no pointer handlers) — the whole agent card is the drop target.
+ */
+.AgentInputPort {
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #9ca3af;
+  border: 2px solid #171717;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* ── Canvas bottom-panel swap (nodes library ↔ chat) ──────────────────────
+ * CanvasBottomPanel — the swap container at the bottom of the canvas. Holds
+ * EITHER the nodes library (ActionStepsBar) OR the chat (CanvasChatPanel),
+ * cross-fading between them via AnimatePresence. The container itself is
+ * height:var(--nodes-library-height) — the SAME height the ActionStepsBar
+ * uses — so the slot never changes size; only the content cross-fades. The
+ * collapse state (nodesLibraryCollapsed) still drives the height animation
+ * so the whole slot collapses/expands smoothly regardless of which panel is
+ * showing.
+ */
+.CanvasBottomPanel {
+  flex-shrink: 0;
+  height: var(--nodes-library-height);
+  position: relative;
+  border-top: 1px solid var(--bolt-elements-borderColor);
+  background-color: var(--bolt-elements-bg-depth-2);
+  overflow: hidden;
+  transition: height 0.24s ease;
+}
+
+/*
+ * Each layer (library / chat) absolutely fills the slot so both can animate
+ * independently (one sliding out while the other slides in) without affecting
+ * the container's height. AnimatePresence with mode="popLayout" lets them
+ * briefly overlap during the cross-fade.
+ */
+.CanvasBottomPanelLayer {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * ActionStepsBar inside the swap container — drop its own height/border/bg
+ * (the container provides those) so it doesn't double up. It just fills the
+ * layer.
+ */
+.CanvasBottomPanelLayer .ActionStepsBar {
+  height: 100%;
+  border-top: none;
+  background-color: transparent;
+  transition: none;
+}
+
+/* ── CanvasChatPanel ─────────────────────────────────────────────────────
+ * The chat area that replaces the nodes library when a trigger node is
+ * double-clicked. A column layout: header (title + close) / body (scrollable
+ * messages) / footer (input + send). Fills the layer 100%×100%. Dark theme
+ * matching the workbench.
+ */
+.CanvasChatPanel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bolt-elements-bg-depth-2);
+  color: var(--bolt-elements-textPrimary);
+}
+
+.CanvasChatHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 5px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--bolt-elements-borderColor);
+}
+
+.CanvasChatHeaderIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 15px;
+  color: var(--scheme-accent);
+  flex-shrink: 0;
+}
+
+.CanvasChatHeaderTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--bolt-elements-textSecondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.CanvasChatCloseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background-color: transparent;
+  color: var(--bolt-elements-textTertiary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+  }
+}
+
+/* CanvasChatBody — the scrollable message list. flex:1 so it fills the space
+ * between the header and footer. modern-scrollbar for a slim scroll gutter. */
+.CanvasChatBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+  }
+}
+
+/* Empty-state hint shown when no messages have been sent yet. */
+.CanvasChatEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--bolt-elements-textTertiary);
+  font-size: 12px;
+  text-align: center;
+  padding: 0 20px;
+
+  & > span:first-child {
+    font-size: 28px;
+    opacity: 0.5;
+  }
+}
+
+/* A single chat message bubble. User + assistant differ in alignment + tint. */
+.CanvasChatMessage {
+  display: flex;
+  max-width: 85%;
+}
+
+.CanvasChatMessageUser {
+  align-self: flex-end;
+}
+
+.CanvasChatMessageUser .CanvasChatMessageText {
+  background-color: rgba(var(--scheme-accent-rgb), 0.18);
+  color: var(--bolt-elements-textPrimary);
+  border-radius: 12px 12px 2px 12px;
+}
+
+.CanvasChatMessageAssistant {
+  align-self: flex-start;
+}
+
+.CanvasChatMessageAssistant .CanvasChatMessageText {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--bolt-elements-textPrimary);
+  border-radius: 12px 12px 12px 2px;
+}
+
+.CanvasChatMessageText {
+  padding: 7px 11px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* CanvasChatFooter — the input row at the bottom. Input fills the space; the
+ * send button is a compact accent circle. */
+.CanvasChatFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--bolt-elements-borderColor);
+}
+
+.CanvasChatInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--bolt-elements-borderColor);
+  border-radius: 8px;
+  background-color: var(--bolt-elements-bg-depth-1);
+  color: var(--bolt-elements-textPrimary);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:focus {
+    border-color: rgba(var(--scheme-accent-rgb), 0.6);
+    box-shadow: 0 0 0 2px rgba(var(--scheme-accent-rgb), 0.18);
+  }
+
+  &::placeholder {
+    color: var(--bolt-elements-textTertiary);
+  }
+}
+
+.CanvasChatSendBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background-color: rgba(var(--scheme-accent-rgb), 0.9);
+  color: #ffffff;
+  font-size: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background-color: var(--scheme-accent);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+/* CanvasChatSendBtnRunning — the send button while an automation walk is in
+ * progress. Dimmed + a subtle pulsing accent so the user sees the run is
+ * active. The icon inside swaps to a spinner (i-ph:spinner-gap animate-spin). */
+.CanvasChatSendBtnRunning {
+  background-color: rgba(var(--scheme-accent-rgb), 0.5);
+  animation: CanvasChatSendPulse 1s ease-in-out infinite;
+
+  &:disabled {
+    opacity: 0.7;
+  }
+}
+
+@keyframes CanvasChatSendPulse {
+  0%, 100% {
+    opacity: 0.7;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/*
+ * CanvasEdgesLayer — the SVG that holds every committed edge + the pending
+ * connection bezier. Rendered inside CanvasNodesLayer (which applies the
+ * pan/zoom transform), so all path coordinates are in canvas space and the
+ * curves stay glued to the nodes.
+ *
+ * The SVG itself has a 1×1 viewport anchored at (0, 0) with overflow:visible,
+ * so paths (which use absolute canvas-space coords, often far outside 0..1)
+ * render freely beyond the viewport. pointer-events:none on the root SVG means
+ * the canvas background (for panning) still receives events that don't land on
+ * an edge; individual edge hit-areas re-enable pointer-events:stroke to stay
+ * clickable.
+ *
+ * z-index 0 keeps the edges behind the nodes (which are siblings inside
+ * CanvasNodesLayer); nodes don't set an explicit z-index but render later in
+ * DOM order, so they naturally stack above the SVG.
+ */
+.CanvasEdgesLayer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/*
+ * While a connection drag is in progress, disable edge hit-areas entirely so
+ * they can't intercept the document.elementFromPoint hit-test that
+ * ConnectionDragController uses to find the drop target under the cursor.
+ * Without this, hovering over an existing edge during a drag would return the
+ * edge's <path> (no [data-canvas-node-id] ancestor) instead of the node
+ * beneath, blocking the drop.
+ */
+.CanvasEdgesLayerDragging {
+  .EdgeHitArea {
+    pointer-events: none !important;
+  }
+}
+
+/* EdgeGroup — each committed edge is wrapped in a <g> for grouping + keying. */
+.EdgeGroup {
+  /* No styles needed; just a semantic container for the hit-area + visible path. */
+}
+
+/*
+ * EdgeHitArea — a wide TRANSPARENT stroke rendered behind each visible edge.
+ * stroke-width ~16 makes the edge easy to click for deletion (the visible
+ * 2px curve is too thin to reliably hit). pointer-events:stroke means only the
+ * stroke (not the fill — there is no fill) receives events; pointer-events:none
+ * on the SVG root is overridden here. cursor:pointer + a subtle hover scale on
+ * the sibling visible path communicates clickability.
+ *
+ * Transparent stroke (stroke:transparent) — invisible but hittable. The
+ * <title> child provides a tooltip ("Click to remove connection").
+ */
+.EdgeHitArea {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+/*
+ * EdgePath — the visible thin stroke drawn on top of the hit area. Light gray
+ * so it reads against the dark canvas background; a subtle accent-tinted
+ * drop-shadow via stroke + filter gives it depth. Hover (when the user hovers
+ * over the hit area above) brightens the visible stroke to signal deletability.
+ *
+ * Stroke is non-scaling (vector-effect) so it stays 2px regardless of zoom —
+ * without this, zooming in would fatten the edge into a blob.
+ */
+.EdgePath {
+  fill: none;
+  stroke: #9ca3af;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 0.12s ease, stroke-width 0.12s ease;
+  pointer-events: none;
+}
+
+/* Brighten + thicken the visible path when the user hovers over the hit area
+ * above it (signalling "click to remove"). Targets the visible path that
+ * follows a hovered hit area within the same .EdgeGroup. */
+.EdgeGroup:hover .EdgePath {
+  stroke: #ef4444;
+  stroke-width: 2.5;
+}
+
+/*
+ * EdgePathPending — the dashed bezier drawn from a source port to the live
+ * cursor position during a connection drag. Same geometry as a committed edge
+ * but dashed (so it reads as "in progress", not "committed") + tinted with the
+ * scheme accent (so it draws the eye + matches the drop-target affordances).
+ *
+ * Animated dash offset gives a subtle "flowing" motion toward the cursor,
+ * signalling directionality (data flows OUT of the trigger, INTO the agent).
+ */
+.EdgePathPending {
+  stroke: var(--scheme-accent);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+  animation: edgePendingFlow 0.6s linear infinite;
+  opacity: 0.9;
+}
+
+@keyframes edgePendingFlow {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* ── Drop-target highlight ────────────────────────────────────────────────
+ * When a connection drag is in progress, agent nodes are valid drop targets.
+ * Highlight them so the user knows where they can drop. Implemented via a
+ * data attribute on the canvas surface (set by MovableCanvas reacting to
+ * connectionSource) + a CSS rule that intensifies the agent card's outline
+ * while the drag is active.
+ *
+ * The plain :hover state already gives feedback when the cursor is directly
+ * over an agent card; this rule adds a GLOW to ALL agent cards during a drag
+ * so the user can see candidate drop targets even before hovering.
+ */
+.MovableCanvas {
+  /* Default: no special treatment. The [data-connection-drag-active="true"]
+     * selector below is set dynamically by MovableCanvas when a connection
+     * drag is in progress. */
+}
+
+.MovableCanvas[data-connection-drag-active='true'] {
+  .CanvasNodeAgent {
+    /* Subtle accent glow on every agent card while a drag is active —
+       * invites the user to drop here. */
+    box-shadow:
+      0 0 0 1px rgba(var(--scheme-accent-rgb), 0.45),
+      0 0 12px rgba(var(--scheme-accent-rgb), 0.25),
+      0 6px 18px rgba(0, 0, 0, 0.45),
+      0 1px 3px rgba(0, 0, 0, 0.35);
+
+    /* Stronger highlight when the cursor is directly over this agent card
+       * (the actual drop target). */
+    &:hover {
+      border-color: rgba(var(--scheme-accent-rgb), 1);
+      box-shadow:
+        0 0 0 2px rgba(var(--scheme-accent-rgb), 0.8),
+        0 0 18px rgba(var(--scheme-accent-rgb), 0.4),
+        0 8px 22px rgba(0, 0, 0, 0.5),
+        0 1px 3px rgba(0, 0, 0, 0.35);
+    }
+  }
+}
+
