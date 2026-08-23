@@ -609,19 +609,26 @@ function Header({ view: _view }: { view: WorkbenchViewType }) {
                 for (const node of nodes) {
                   const nx = tx(node.x);
                   const ny = ty(node.y);
-                  const nw = node.width ?? 64;
-                  const nh = node.height ?? 64;
+                  // aitool nodes are LIGHTLY REDUCED to 52×52 (vs the 64×64 memory
+                  // / llm disc) on the canvas — mirror that smaller footprint in
+                  // the minimap so the minimap's silhouettes match the real cards.
+                  const isAiTool = node.kind === 'aitool';
+                  const aitoolSize = AITOOL_CARD_SIZE; // 52
+                  const nw = node.width ?? (isAiTool ? aitoolSize : 64);
+                  const nh = node.height ?? (isAiTool ? aitoolSize : 64);
 
                   // Node background (dark) + border (accent).
                   ctx.fillStyle = '#171717';
                   // Circular kinds (memory / llm / aitool) get the teal accent + a
-                  // fully-round radius (32 = half of 64 → a circle); triggers get
-                  // amber; everything else green. Matches the placed-card silhouettes.
+                  // fully-round radius (half the card's width/height → a circle);
+                  // triggers get amber; everything else green. Matches the placed-
+                  // card silhouettes.
                   const isCircularKind = node.kind === 'memory' || node.kind === 'llm' || node.kind === 'aitool';
                   ctx.strokeStyle = node.kind === 'trigger' ? '#f59e0b' : isCircularKind ? '#10b981' : '#4ade80';
                   ctx.lineWidth = 2;
                   ctx.beginPath();
-                  ctx.roundRect(nx, ny, nw, nh, isCircularKind ? 32 : 4);
+                  // roundRect radius = half the SMALLER dimension → a circle.
+                  ctx.roundRect(nx, ny, nw, nh, isCircularKind ? Math.min(nw, nh) / 2 : 4);
                   ctx.fill();
                   ctx.stroke();
 
@@ -1414,6 +1421,15 @@ const ACTION_CARD_SIZE = 64;
  * the trigger, just visualised against a round silhouette.
  */
 const MEMORY_CARD_SIZE = 64;
+/*
+ * AI Agent TOOL nodes render as a SMALLER circle inscribed in a 52×52 bounding
+ * box — a light reduction from the 64×64 memory / llm disc so the tool nodes
+ * read as a touch smaller than the memory / llm nodes they sit beside in the
+ * same agent's tool cluster. The output port sits at the circle's topmost
+ * point (horizontally centred), same as memory / llm — just on the smaller
+ * disc. Used by getOutputPortPosition to anchor the aitool's top port.
+ */
+const AITOOL_CARD_SIZE = 52;
 
 /*
  * describeNodeExecution + runCanvasAutomation + RunAutomationOptions live in
@@ -1464,13 +1480,20 @@ function getOutputPortPosition(node: CanvasNode, sourcePort?: 'right' | 'bottom'
     return { x: node.x + AGENT_CARD_WIDTH, y: node.y + AGENT_CARD_HEIGHT / 2 };
   }
 
-  if (node.kind === 'memory' || node.kind === 'llm' || node.kind === 'aitool') {
-    // TOP edge, horizontally centred — the memory / llm / aitool node's output
-    // port sits at the topmost point of the circle (not the right edge like
+  if (node.kind === 'memory' || node.kind === 'llm') {
+    // TOP edge, horizontally centred — the memory / llm node's output port
+    // sits at the topmost point of the 64×64 circle (not the right edge like
     // trigger/agent), so a node placed below an agent connects UPWARD into one
-    // of the agent's bottom connectors (diamond for memory/llm, plus-square for
-    // aitool).
+    // of the agent's bottom diamonds.
     return { x: node.x + MEMORY_CARD_SIZE / 2, y: node.y };
+  }
+
+  if (node.kind === 'aitool') {
+    // Same as memory / llm (top edge, horizontally centred) but on the SMALLER
+    // 52×52 disc, so the port sits at the topmost point of the smaller circle.
+    // Distinct connection TARGET is handled by getInputPortPosition (the edge
+    // lands on the agent's bottom PLUS connector, not a diamond).
+    return { x: node.x + AITOOL_CARD_SIZE / 2, y: node.y };
   }
 
   // Sticky notes don't have an output port — they're decorative annotations,
@@ -2531,7 +2554,7 @@ function CanvasNodesLayer({
                   : dropPreview.kind === 'llm'
                     ? styles.CanvasNodePreviewLlm
                     : dropPreview.kind === 'aitool'
-                      ? styles.CanvasNodePreviewMemory
+                      ? styles.CanvasNodePreviewAiTool
                       : dropPreview.kind === 'sticky'
                         ? styles.CanvasNodePreviewSticky
                         : styles.CanvasNodePreviewAction,
@@ -2785,11 +2808,12 @@ function CanvasNodeItem({ node, zoom }: { node: CanvasNode; zoom: number }) {
    *     (border-radius:50%), centred memory icon, title caption BELOW the card.
    *     Same dark body + permanent accent outline + output port as the trigger,
    *     but round and bolt-less.
-   *   - 'aitool'  → .CanvasNodeMemory + MemoryNodeBody: visually IDENTICAL to
-   *     'memory' (64×64 circle, top port, centred icon, title below) but
-   *     represents an AI Agent TOOL. Distinct connection target: routes
-   *     upward into the agent's bottom THIRD connector (the plus-square) so a
-   *     tool, a memory node, AND an llm node can all hang off one agent.
+   *   - 'aitool'  → .CanvasNodeAiTool + MemoryNodeBody: visually IDENTICAL to
+   *     'memory' (circle, top port, centred icon, title below) but LIGHTLY
+   *     REDUCED to 52×52 (vs memory's 64×64) so the tool nodes read as a touch
+   *     smaller. Represents an AI Agent TOOL. Distinct connection target:
+   *     routes upward into the agent's bottom THIRD connector (the plus-square)
+   *     so a tool, a memory node, AND an llm node can all hang off one agent.
    *   - 'sticky'  → .CanvasNodeSticky + StickyNodeBody: warm-yellow rectangle
    *     with SHARP corners (border-radius:0), editable textarea body, header
    *     strip with title, decorative dog-ear fold, and a bottom-right resize
@@ -2807,7 +2831,7 @@ function CanvasNodeItem({ node, zoom }: { node: CanvasNode; zoom: number }) {
           : node.kind === 'llm'
             ? styles.CanvasNodeLlm
             : node.kind === 'aitool'
-              ? styles.CanvasNodeMemory
+              ? styles.CanvasNodeAiTool
               : node.kind === 'sticky'
                 ? styles.CanvasNodeSticky
                 : styles.CanvasNodeAction;

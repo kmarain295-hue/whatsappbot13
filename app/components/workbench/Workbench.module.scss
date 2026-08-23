@@ -386,6 +386,7 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  position: relative;
 }
 
 .MovableCanvas {
@@ -1838,9 +1839,13 @@
 /* Shared by .CanvasNodeMemory AND .CanvasNodeLlm — both are 64×64 CIRCLES with
  * the dark body, accent outline, top-anchored output port, and outside title
  * caption. They differ only in icon + connection target, not in card chrome,
- * so the rules are grouped. */
+ * so the rules are grouped. .CanvasNodeAiTool joins the group so it inherits
+ * the same dark body / outline / top-port chrome, then gets a SEPARATE size
+ * override below (52×52 — a light reduction so the AI tool nodes read as a
+ * touch smaller than the memory / llm nodes they sit beside). */
 .CanvasNodeMemory,
-.CanvasNodeLlm {
+.CanvasNodeLlm,
+.CanvasNodeAiTool {
   width: 64px;
   height: 64px;
   padding: 0;
@@ -1896,6 +1901,29 @@
 
   .OutputPort:active {
     transform: translateX(-50%) scale(1.1);
+  }
+}
+
+/*
+ * CanvasNodeAiTool — size override. AI Agent TOOL nodes (from the "AI Agent
+ * Tools" library section) are LIGHTLY REDUCED from the 64×64 memory / llm
+ * disc down to 52×52, so they read as a touch smaller than the memory / llm
+ * nodes they sit beside in the same agent's tool cluster. The icon + its
+ * font-size shrink proportionally (24px → 20px). Everything else (dark body,
+ * accent outline, top-anchored port, outside caption) is inherited from the
+ * shared memory/llm rule above. The port's left:50% + translateX(-50%) keeps
+ * the top port auto-centred on the smaller circle, so no port-position tweak
+ * is needed here — the canvas-space port position is handled by
+ * AITOOL_CARD_SIZE in getOutputPortPosition.
+ */
+.CanvasNodeAiTool {
+  width: 52px;
+  height: 52px;
+
+  .MemoryIconArea {
+    width: 52px;
+    height: 52px;
+    font-size: 20px;
   }
 }
 
@@ -2068,6 +2096,28 @@
   color: #e5e7eb;
   font-size: 10px;
   line-height: 1;
+}
+
+/*
+ * AgentPlusSquareInteractive — the INTERACTIVE variant of the plus-square (on
+ * placed agent nodes only). Adds pointer-events + a crosshair cursor + hover
+ * accent so the user knows they can press + drag to start a connection.
+ */
+.AgentPlusSquareInteractive {
+  pointer-events: auto;
+  cursor: crosshair;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    border-color: rgba(var(--scheme-accent-rgb), 1);
+    background-color: rgba(var(--scheme-accent-rgb), 0.3);
+    box-shadow: 0 0 0 2px rgba(var(--scheme-accent-rgb), 0.3);
+  }
+
+  &:active {
+    transform: scale(1.15);
+  }
+
   box-shadow:
     0 0 0 1px #171717,
     0 1px 3px rgba(0, 0, 0, 0.45);
@@ -2203,9 +2253,13 @@
  * Shared dashed drop-preview variant for memory AND llm nodes. Same 64×64
  * circular footprint as the placed card, but a dashed accent ring + muted fill
  * so it reads as a placeholder. Matches the trigger preview's treatment.
+ * .CanvasNodePreviewAiTool joins the group (inherits the dashed ring + muted
+ * fill + top-anchored port) then gets a 52×52 size override below so the
+ * drop preview matches the smaller placed aitool card.
  */
 .CanvasNodePreviewMemory,
-.CanvasNodePreviewLlm {
+.CanvasNodePreviewLlm,
+.CanvasNodePreviewAiTool {
   width: 64px;
   height: 64px;
   padding: 0;
@@ -2232,6 +2286,23 @@
     left: 50%;
     transform: translateX(-50%);
     opacity: 0.55;
+  }
+}
+
+/*
+ * CanvasNodePreviewAiTool — drop-preview size override. Matches the smaller
+ * 52×52 placed aitool card so the dashed ghost previews the correct footprint
+ * while dragging an AI Agent Tool node onto the canvas. Inherits the dashed
+ * ring + muted fill + top port from the shared preview rule above.
+ */
+.CanvasNodePreviewAiTool {
+  width: 52px;
+  height: 52px;
+
+  .MemoryIconArea {
+    width: 52px;
+    height: 52px;
+    font-size: 20px;
   }
 }
 
@@ -3166,3 +3237,230 @@
   }
 }
 
+
+/* ── NodePropertiesPanel — modal overlay for configuring utility nodes ────
+ * Opens when the user double-clicks a UTILITY node on the canvas. A
+ * semi-opaque dark backdrop blurs the canvas behind it (backdrop-filter:
+ * blur). The panel card is centered, ~420px wide, with a header (title +
+ * close), body (config fields), + footer (Done button).
+ */
+.NodePropertiesOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.NodePropertiesPanel {
+  width: 420px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #1a1a1a;
+  border: 1px solid rgba(var(--scheme-accent-rgb), 0.4);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px rgba(var(--scheme-accent-rgb), 0.15),
+    0 20px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.NodePropertiesHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.NodePropertiesHeaderIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 18px;
+  color: var(--scheme-accent);
+  flex-shrink: 0;
+}
+
+.NodePropertiesHeaderTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f4f6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.NodePropertiesCloseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+  }
+}
+
+.NodePropertiesBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.NodePropertiesField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.NodePropertiesLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+}
+
+.NodePropertiesInput,
+.NodePropertiesTextarea,
+.NodePropertiesSelect {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background-color: #0d0d0d;
+  color: #f3f4f6;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:focus {
+    border-color: rgba(var(--scheme-accent-rgb), 0.6);
+    box-shadow: 0 0 0 2px rgba(var(--scheme-accent-rgb), 0.18);
+  }
+
+  &::placeholder {
+    color: #6b7280;
+  }
+}
+
+.NodePropertiesTextarea {
+  min-height: 80px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.NodePropertiesSelect {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+.NodePropertiesHint {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+  text-align: center;
+  padding: 20px 10px;
+}
+
+.NodePropertiesFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.NodePropertiesDoneBtn {
+  padding: 8px 22px;
+  border: none;
+  border-radius: 8px;
+  background-color: rgba(var(--scheme-accent-rgb), 0.9);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background-color: var(--scheme-accent);
+  }
+}
+
+/* ── MemoryTreePanel — modal showing memory tree with connections ────── */
+.MemoryTreeOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.MemoryTreeCanvas {
+  width: 95%;
+  max-width: 900px;
+  height: 95%;
+  max-height: 900px;
+  border: none;
+  border-radius: 0;
+  background-color: #ffffff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Feature #9: Connection Labels ────────────────────────────────────── */
+.EdgeLabel {
+  font-size: 10px;
+  font-weight: 600;
+  fill: #9ca3af;
+  pointer-events: none;
+  user-select: none;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
