@@ -56,6 +56,19 @@ import {
   importCanvas,
   autoLayoutCanvas,
   executeNode,
+  propertiesPanelNodeId,
+  openNodeProperties,
+  closeNodeProperties,
+  getNodeConfig,
+  setNodeConfig,
+  memoryTreePanelNodeId,
+  openMemoryTreePanel,
+  closeMemoryTreePanel,
+  getNeuralMemory,
+  addNeuralMemory,
+  retrieveRelevantMemory,
+  setEdgeLabel,
+  exportCanvasAsCode,
   STICKY_DEFAULT_WIDTH,
   STICKY_DEFAULT_HEIGHT,
   STICKY_MIN_WIDTH,
@@ -121,6 +134,14 @@ export function Workbench() {
               * library. Both panels occupy the same slot so the swap is smooth.
               */}
             <CanvasBottomPanel />
+            {/*
+              * MemoryTreePanel: mounted INSIDE the workbench motion.div (not
+              * inside CodeView) so its position:absolute overlay covers the
+              * COMPLETE CANVAS (header + canvas + nodes library), NOT just the
+              * canvas area. This matches the user's request: "the memory node
+              * property panel will open on the complete canvas."
+              */}
+            <MemoryTreePanel />
           </motion.div>
           <DragController />
           <DragGhost />
@@ -492,13 +513,29 @@ function Header({ view: _view }: { view: WorkbenchViewType }) {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `workflow-${Date.now()}.json`;
+                // Use the project name from the text field as the filename.
+                // Fallback to "workflow" if the name is empty. Sanitize the
+                // name so it's safe as a filename (strip slashes, etc.).
+                const rawName = (draftName || projectName || 'workflow').trim();
+                const safeName = rawName.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'workflow';
+                a.download = `${safeName}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
-                toast.success('Workflow exported');
+                toast.success(`Exported as "${safeName}.json"`);
               }}
               onUpload={() => {
                 fileInputRef.current?.click();
+              }}
+              onExportCode={() => {
+                const code = exportCanvasAsCode();
+                const blob = new Blob([code], { type: 'text/javascript' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${(draftName || projectName || 'workflow').replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'workflow'}.js`;
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success('Workflow exported as code');
               }}
               onExportImage={() => {
                 /*
@@ -577,10 +614,14 @@ function Header({ view: _view }: { view: WorkbenchViewType }) {
 
                   // Node background (dark) + border (accent).
                   ctx.fillStyle = '#171717';
-                  ctx.strokeStyle = node.kind === 'trigger' ? '#f59e0b' : node.kind === 'memory' || node.kind === 'llm' ? '#10b981' : '#4ade80';
+                  // Circular kinds (memory / llm / aitool) get the teal accent + a
+                  // fully-round radius (32 = half of 64 → a circle); triggers get
+                  // amber; everything else green. Matches the placed-card silhouettes.
+                  const isCircularKind = node.kind === 'memory' || node.kind === 'llm' || node.kind === 'aitool';
+                  ctx.strokeStyle = node.kind === 'trigger' ? '#f59e0b' : isCircularKind ? '#10b981' : '#4ade80';
                   ctx.lineWidth = 2;
                   ctx.beginPath();
-                  ctx.roundRect(nx, ny, nw, nh, node.kind === 'memory' || node.kind === 'llm' ? 32 : 4);
+                  ctx.roundRect(nx, ny, nw, nh, isCircularKind ? 32 : 4);
                   ctx.fill();
                   ctx.stroke();
 
@@ -695,6 +736,7 @@ function MoreMenu({
   onDownload,
   onUpload,
   onExportImage,
+  onExportCode,
   onClose,
 }: {
   showGrid: boolean;
@@ -706,6 +748,7 @@ function MoreMenu({
   onDownload: () => void;
   onUpload: () => void;
   onExportImage: () => void;
+  onExportCode: () => void;
   onClose: () => void;
 }) {
   // Action items: run the callback, then close the menu.
@@ -743,6 +786,7 @@ function MoreMenu({
       <div className={styles.MenuGroup}>
         <div className={styles.MenuGroupLabel}>Export</div>
         <MenuItem icon="i-ph:camera" label="Export as image (PNG)" onClick={act(onExportImage)} />
+        <MenuItem icon="i-ph:file-code" label="Export as code (JS)" onClick={act(onExportCode)} />
       </div>
     </div>
   );
@@ -789,6 +833,12 @@ function CodeView({ selectedPath: _selectedPath }: { selectedPath: string | unde
     <div className={styles.CodeView}>
       <div className={styles.EditorPane}>
         <MovableCanvas />
+        {/*
+          * NodePropertiesPanel: modal overlay for configuring utility nodes.
+          * Mounted INSIDE the EditorPane so the overlay is scoped to the canvas
+          * area only (not the nodes library panel below).
+          */}
+        <NodePropertiesPanel />
       </div>
     </div>
   );
@@ -1222,6 +1272,7 @@ function MovableCanvas() {
             | 'agent'
             | 'memory'
             | 'llm'
+            | 'aitool'
             | 'action'
             | 'sticky',
           // Carry the agent-card label overrides so the dashed drop preview
@@ -1374,7 +1425,35 @@ const MEMORY_CARD_SIZE = 64;
  */
 
 /** Canvas-space position of a node's OUTPUT port center. */
-function getOutputPortPosition(node: CanvasNode): { x: number; y: number } {
+function getOutputPortPosition(node: CanvasNode, sourcePort?: 'right' | 'bottom'): { x: number; y: number } {
+  /*
+   * The bottom-port (plus square) is a SEPARATE connector. It must NOT affect
+   * or change any other connector — each edge anchors at ITS OWN source port.
+   *
+   * - For COMMITTED edges: the edge's `sourcePort` field is passed as the
+   *   `sourcePort` parameter. Use ONLY that (don't read the global atom — a
+   *   pending drag from the bottom port must NOT re-route existing right-port
+   *   edges).
+   * - For the PENDING DRAG: `sourcePort` is undefined, so fall back to the
+   *   global `connectionSource.get()?.portRole` (which reflects the current
+   *   drag's port).
+   */
+  let port: 'right' | 'bottom' | undefined = sourcePort;
+
+  if (!port) {
+    // Pending drag — read from the global connection source.
+    const connSrc = connectionSource.get();
+    port = connSrc?.portRole;
+  }
+
+  if (node.kind === 'agent' && port === 'bottom') {
+    // The plus square hangs below the THIRD diamond. Its centre is at:
+    //   x: 149px from the agent's left edge.
+    //   y: 90px below the agent's top edge.
+    // Measured empirically from the rendered DOM for pixel-perfect anchoring.
+    return { x: node.x + 149, y: node.y + 90 };
+  }
+
   if (node.kind === 'trigger') {
     // Right edge, vertically centred.
     return { x: node.x + TRIGGER_CARD_WIDTH, y: node.y + TRIGGER_CARD_HEIGHT / 2 };
@@ -1385,11 +1464,12 @@ function getOutputPortPosition(node: CanvasNode): { x: number; y: number } {
     return { x: node.x + AGENT_CARD_WIDTH, y: node.y + AGENT_CARD_HEIGHT / 2 };
   }
 
-  if (node.kind === 'memory' || node.kind === 'llm') {
-    // TOP edge, horizontally centred — the memory / llm node's output port
-    // sits at the topmost point of the circle (not the right edge like
+  if (node.kind === 'memory' || node.kind === 'llm' || node.kind === 'aitool') {
+    // TOP edge, horizontally centred — the memory / llm / aitool node's output
+    // port sits at the topmost point of the circle (not the right edge like
     // trigger/agent), so a node placed below an agent connects UPWARD into one
-    // of the agent's bottom diamonds.
+    // of the agent's bottom connectors (diamond for memory/llm, plus-square for
+    // aitool).
     return { x: node.x + MEMORY_CARD_SIZE / 2, y: node.y };
   }
 
@@ -1413,19 +1493,35 @@ function getOutputPortPosition(node: CanvasNode): { x: number; y: number } {
  * incoming edge's arrowhead lands.
  *
  * Defaults to the left edge, vertically centred (the trigger→agent attachment
- * point). But when the SOURCE is a memory or llm node connecting INTO an agent,
- * the edge should land on one of the agent's BOTTOM diamonds instead:
+ * point). But when the SOURCE is a memory, llm, or aitool node connecting INTO
+ * an agent, the edge lands on one of the agent's BOTTOM connectors instead:
  *   - llm    → BOTTOM-LEFT (FIRST) diamond, at left:14px (centre +4px = 18px
  *     from the card's left edge).
  *   - memory → BOTTOM-SECOND (MIDDLE) diamond — the "right inner" diamond,
  *     shifted slightly left to right:36px (centre = 168 - 36 - 4 = 128px from
  *     the card's left edge). The second of three when counted left-to-right.
+ *   - aitool → BOTTOM-THIRD PLUS connector — the AgentPlusSquare ("+" chip)
+ *     dangling below the third (rightmost) diamond (centre = 149px from the
+ *     card's left edge, 90px below the top edge). Distinct from both diamonds
+ *     so a tool, a memory node, AND an llm node can all hang off one agent.
  * (Previously memory hit the FIRST diamond and llm hit the SECOND — the two
  * were SWAPPED so the memory node's wire now lands on the middle diamond.)
  * Both diamonds straddle the bottom edge, so their vertical centre is exactly
  * at the card's bottom edge (y = AGENT_CARD_HEIGHT).
  */
 function getInputPortPosition(node: CanvasNode, source?: CanvasNode): { x: number; y: number } {
+  if (source?.kind === 'aitool' && node.kind === 'agent') {
+    // THIRD bottom connector — the AgentPlusSquare (the "+"-shaped interactive
+    // chip) that hangs BELOW the third (rightmost) diamond. AI Agent TOOL nodes
+    // connect UPWARD into this plus connector (distinct from memory → 2nd
+    // diamond and llm → 1st diamond), so all three can hang off the same agent.
+    // The plus-square's centre sits 149px from the agent's left edge and 90px
+    // below its top edge (measured empirically — it dangles below the card's
+    // 64px-tall body via the AgentDiamondTail). Matches the source port used by
+    // getOutputPortPosition for an agent's 'bottom' (plus) port.
+    return { x: node.x + 149, y: node.y + 90 };
+  }
+
   if (source?.kind === 'memory' && node.kind === 'agent') {
     // Second (middle) bottom diamond — AgentDiamondRightInner, now at right:36px
     // (shifted slightly left of its original right:28px spot). Card width 168px
@@ -1656,7 +1752,7 @@ function CanvasEdgesLayer() {
           return null;
         }
 
-        const sp = getOutputPortPosition(src);
+        const sp = getOutputPortPosition(src, edge.sourcePort);
         // Pass the source so getInputPortPosition can route the edge to the
         // agent's bottom-left diamond when the source is a memory node.
         const tp = getInputPortPosition(tgt, src);
@@ -1678,13 +1774,31 @@ function CanvasEdgesLayer() {
                 removeCanvasEdge(edge.id);
                 toast.info('Connection removed');
               }}
+              onDoubleClick={(e) => {
+                // Feature #9: Double-click to label the connection.
+                e.stopPropagation();
+                const newLabel = window.prompt('Connection label:', edge.label ?? '');
+                if (newLabel !== null) {
+                  setEdgeLabel(edge.id, newLabel);
+                }
+              }}
             >
-              <title>Click to remove connection</title>
+              <title>Click to remove · Double-click to label</title>
             </path>
-            {/* Visible thin stroke drawn on top. markerEnd caps it with the
-                arrowhead — only for non-memory sources (trigger→agent keeps
-                the arrow; memory→agent connects with a clean endpoint). */}
+            {/* Visible thin stroke drawn on top. */}
             <path className={styles.EdgePath} d={d} markerEnd={showArrow ? 'url(#edge-arrow)' : undefined} />
+
+            {/* Feature #9: Connection label (if set). */}
+            {edge.label && (
+              <text
+                x={(sp.x + tp.x) / 2}
+                y={(sp.y + tp.y) / 2 - 8}
+                textAnchor="middle"
+                className={styles.EdgeLabel}
+              >
+                {edge.label}
+              </text>
+            )}
           </g>
         );
       })}
@@ -1764,8 +1878,24 @@ function ConnectionDragController() {
           // participate in the node graph as both a connection SOURCE (their
           // right-edge OutputPort) and a connection TARGET (the whole card).
           // Reject self-loops (can't connect a node to itself).
-          if (id && (kind === 'agent' || kind === 'action') && id !== source.sourceId) {
-            overTargetId = id;
+          //
+          // EXCEPTION: an AI Agent TOOL (kind 'aitool') may ONLY connect to an
+          // AGENT — its wire routes upward into the agent's bottom PLUS
+          // connector (getInputPortPosition handles the routing). Wiring an
+          // aitool into a utility/action node is rejected so tools stay
+          // semantically attached to the agent they serve.
+          if (id && id !== source.sourceId) {
+            const sourceNode = canvasNodes.get().find((n) => n.id === source.sourceId);
+            const sourceIsTool = sourceNode?.kind === 'aitool';
+
+            if (sourceIsTool) {
+              // Tools → agent ONLY.
+              if (kind === 'agent') {
+                overTargetId = id;
+              }
+            } else if (kind === 'agent' || kind === 'action') {
+              overTargetId = id;
+            }
           }
         }
       }
@@ -2068,21 +2198,54 @@ function AgentNodeBody({
         * 45°, positioned absolutely relative to the .CanvasNodeAgent wrapper
         * so it sits half-inside / half-outside the card's bottom edge.
         */}
-      <div className={styles.AgentBottomDiamonds} aria-hidden>
-        <span className={classNames(styles.AgentDiamond, styles.AgentDiamondLeft)} />
-        <span className={classNames(styles.AgentDiamond, styles.AgentDiamondRightOuter)} />
-        <span className={classNames(styles.AgentDiamond, styles.AgentDiamondRightInner)} />
+      <div className={styles.AgentBottomDiamonds}>
+        <span className={classNames(styles.AgentDiamond, styles.AgentDiamondLeft)} aria-hidden />
+        <span className={classNames(styles.AgentDiamond, styles.AgentDiamondRightOuter)} aria-hidden />
+        <span className={classNames(styles.AgentDiamond, styles.AgentDiamondRightInner)} aria-hidden />
         {/*
-          * A thin vertical "tail" line dropping from the THIRD (rightmost)
-          * diamond's bottom tip, terminated by a small square-outline chip with
-          * a + glyph — reads as an "add / expand a node here" affordance hanging
-          * below the agent. Like the diamonds it is purely decorative (the whole
-          * group is aria-hidden + pointer-events:none).
+          * The tail line + plus-square hanging off the THIRD (rightmost) diamond.
+          * On a PLACED agent (nodeId provided), the plus-square is an
+          * INTERACTIVE output port — press + drag from it to start a connection
+          * to another node (same behaviour as the right-edge OutputPort). On the
+          * drop preview (no nodeId), it renders as a plain decorative span.
+          * This makes the agent's bottom "+" connector fully workable: the user
+          * can wire nodes to/from it like every other port.
           */}
-        <span className={styles.AgentDiamondTail} />
-        <span className={styles.AgentPlusSquare}>
-          <span className="i-ph:plus" />
-        </span>
+        <span className={styles.AgentDiamondTail} aria-hidden />
+        {nodeId ? (
+          <span
+            className={classNames(styles.AgentPlusSquare, styles.AgentPlusSquareInteractive)}
+            onPointerDown={(e) => {
+              // Same logic as OutputPort's onPointerDown: stop the node drag,
+              // read the port's screen position, convert to canvas space, +
+              // start a connection drag.
+              e.stopPropagation();
+              const surface = canvasSurfaceEl.get();
+              const { panX, panY, zoom } = canvasTransform.get();
+
+              if (!surface) {
+                return;
+              }
+
+              const portRect = e.currentTarget.getBoundingClientRect();
+              const canvasRect = surface.getBoundingClientRect();
+              const portScreenX = portRect.left + portRect.width / 2;
+              const portScreenY = portRect.top + portRect.height / 2;
+              const canvasX = (portScreenX - canvasRect.left - panX) / zoom;
+              const canvasY = (portScreenY - canvasRect.top - panY) / zoom;
+              startConnection(nodeId, canvasX, canvasY, 'bottom');
+            }}
+            data-port-role="output"
+            aria-label="Agent bottom port — drag to connect"
+            title="Drag to connect"
+          >
+            <span className="i-ph:plus" />
+          </span>
+        ) : (
+          <span className={styles.AgentPlusSquare} aria-hidden>
+            <span className="i-ph:plus" />
+          </span>
+        )}
       </div>
     </>
   );
@@ -2329,7 +2492,7 @@ function CanvasNodesLayer({
     title: string;
     icon: string;
     detail?: string;
-    kind: 'trigger' | 'agent' | 'memory' | 'llm' | 'action' | 'sticky';
+    kind: 'trigger' | 'agent' | 'memory' | 'llm' | 'aitool' | 'action' | 'sticky';
     mainLabel?: string;
     subLabel?: string;
     width?: number;
@@ -2367,9 +2530,11 @@ function CanvasNodesLayer({
                   ? styles.CanvasNodePreviewMemory
                   : dropPreview.kind === 'llm'
                     ? styles.CanvasNodePreviewLlm
-                    : dropPreview.kind === 'sticky'
-                      ? styles.CanvasNodePreviewSticky
-                      : styles.CanvasNodePreviewAction,
+                    : dropPreview.kind === 'aitool'
+                      ? styles.CanvasNodePreviewMemory
+                      : dropPreview.kind === 'sticky'
+                        ? styles.CanvasNodePreviewSticky
+                        : styles.CanvasNodePreviewAction,
           )}
           style={{
             left: dropPreview.x,
@@ -2394,6 +2559,8 @@ function CanvasNodesLayer({
           ) : dropPreview.kind === 'memory' ? (
             <MemoryNodeBody icon={dropPreview.icon} title={dropPreview.title} />
           ) : dropPreview.kind === 'llm' ? (
+            <MemoryNodeBody icon={dropPreview.icon} title={dropPreview.title} />
+          ) : dropPreview.kind === 'aitool' ? (
             <MemoryNodeBody icon={dropPreview.icon} title={dropPreview.title} />
           ) : dropPreview.kind === 'sticky' ? (
             <StickyNodeBody title={dropPreview.title} />
@@ -2618,6 +2785,11 @@ function CanvasNodeItem({ node, zoom }: { node: CanvasNode; zoom: number }) {
    *     (border-radius:50%), centred memory icon, title caption BELOW the card.
    *     Same dark body + permanent accent outline + output port as the trigger,
    *     but round and bolt-less.
+   *   - 'aitool'  → .CanvasNodeMemory + MemoryNodeBody: visually IDENTICAL to
+   *     'memory' (64×64 circle, top port, centred icon, title below) but
+   *     represents an AI Agent TOOL. Distinct connection target: routes
+   *     upward into the agent's bottom THIRD connector (the plus-square) so a
+   *     tool, a memory node, AND an llm node can all hang off one agent.
    *   - 'sticky'  → .CanvasNodeSticky + StickyNodeBody: warm-yellow rectangle
    *     with SHARP corners (border-radius:0), editable textarea body, header
    *     strip with title, decorative dog-ear fold, and a bottom-right resize
@@ -2634,9 +2806,11 @@ function CanvasNodeItem({ node, zoom }: { node: CanvasNode; zoom: number }) {
           ? styles.CanvasNodeMemory
           : node.kind === 'llm'
             ? styles.CanvasNodeLlm
-            : node.kind === 'sticky'
-              ? styles.CanvasNodeSticky
-              : styles.CanvasNodeAction;
+            : node.kind === 'aitool'
+              ? styles.CanvasNodeMemory
+              : node.kind === 'sticky'
+                ? styles.CanvasNodeSticky
+                : styles.CanvasNodeAction;
 
   /*
    * Sticky notes carry their own width/height; every other kind is sized by
@@ -2676,16 +2850,23 @@ function CanvasNodeItem({ node, zoom }: { node: CanvasNode; zoom: number }) {
       /*
        * DOUBLE-CLICK: on a TRIGGER node, opens the chat panel at the bottom of
        * the canvas (replacing the nodes library panel there). The trigger's
-       * instance id is recorded so the chat can be scoped to it. Other kinds
-       * don't open the chat (the user asked specifically for the On Message
-       * trigger). stopPropagation so the canvas-background double-click handler
-       * (which CLOSES the chat) doesn't also fire when double-clicking a node.
+       * instance id is recorded so the chat can be scoped to it. On an ACTION
+       * (utility) node, opens the NodePropertiesPanel modal overlay instead so
+       * the user can configure that node's behaviour (duration, key, value,
+       * template, etc.). stopPropagation so the canvas-background double-click
+       * handler (which CLOSES the chat) doesn't also fire when double-clicking
+       * a node. Other kinds (agent, memory, llm, sticky) do nothing on
+       * double-click.
        */
       onDoubleClick={(e) => {
         e.stopPropagation();
 
         if (node.kind === 'trigger') {
           openCanvasChat(node.id);
+        } else if (node.kind === 'action') {
+          openNodeProperties(node.id);
+        } else if (node.kind === 'memory') {
+          openMemoryTreePanel(node.id);
         }
       }}
       /*
@@ -2740,6 +2921,8 @@ function CanvasNodeItem({ node, zoom }: { node: CanvasNode; zoom: number }) {
       ) : node.kind === 'memory' ? (
         <MemoryNodeBody icon={node.icon} title={node.title} nodeId={node.id} />
       ) : node.kind === 'llm' ? (
+        <MemoryNodeBody icon={node.icon} title={node.title} nodeId={node.id} />
+      ) : node.kind === 'aitool' ? (
         <MemoryNodeBody icon={node.icon} title={node.title} nodeId={node.id} />
       ) : node.kind === 'sticky' ? (
         <>
@@ -3104,6 +3287,40 @@ const SAMPLE_ACTION_SECTIONS: ActionStepSection[] = [
         detail: 'ready',
         kind: 'agent',
       },
+    ],
+  },
+  {
+    // ── AI Agent Tools ───────────────────────────────────────────────────
+    //  A dedicated section of TOOL nodes that attach to an AI agent. Every
+    //  node here renders as a CIRCULAR card (kind:'aitool' — visually identical
+    //  to the LLM / memory node: 64×64 disc, icon dead-centre, output port on
+    //  the TOP edge, title caption below). Distinct connection target: an
+    //  aitool node's wire routes UPWARD into the agent's bottom THIRD
+    //  connector — the PLUS SQUARE (AgentPlusSquare) — so a tool, a memory
+    //  node (→ 2nd diamond), AND an llm node (→ 1st diamond) can ALL hang off
+    //  the same agent without colliding. Tools are "dummy but connectable":
+    //  they pulse alongside their agent during a run but don't run their own
+    //  logic yet (real backends can be wired in later per node title).
+    id: 'aiagenttools',
+    label: 'AI Agent Tools',
+    shortLabel: 'AI Tools',
+    icon: 'i-ph:wrench',
+    steps: [
+      { id: 'at1', title: 'Image Search', status: 'done', icon: 'i-ph:magnifying-glass', detail: 'ready', kind: 'aitool' },
+      { id: 'at2', title: 'Online Search', status: 'done', icon: 'i-ph:globe', detail: 'ready', kind: 'aitool' },
+      { id: 'at3', title: 'Web Reader', status: 'done', icon: 'i-ph:book-open', detail: 'ready', kind: 'aitool' },
+      { id: 'at4', title: 'Web Scraper', status: 'done', icon: 'i-ph:code', detail: 'ready', kind: 'aitool' },
+      { id: 'at5', title: 'Browser', status: 'done', icon: 'i-ph:browser', detail: 'ready', kind: 'aitool' },
+      { id: 'at6', title: 'Terminal', status: 'done', icon: 'i-ph:terminal-window', detail: 'ready', kind: 'aitool' },
+      { id: 'at7', title: 'Host', status: 'done', icon: 'i-ph:hard-drive', detail: 'ready', kind: 'aitool' },
+      { id: 'at8', title: 'Database', status: 'done', icon: 'i-ph:hard-drives', detail: 'ready', kind: 'aitool' },
+      { id: 'at9', title: 'Image Editor', status: 'done', icon: 'i-ph:pencil-simple', detail: 'ready', kind: 'aitool' },
+      { id: 'at10', title: 'Image Generator', status: 'done', icon: 'i-ph:image', detail: 'ready', kind: 'aitool' },
+      { id: 'at11', title: 'Text to Speech', status: 'done', icon: 'i-ph:speaker-high', detail: 'ready', kind: 'aitool' },
+      { id: 'at12', title: 'Video Generator', status: 'done', icon: 'i-ph:video', detail: 'ready', kind: 'aitool' },
+      { id: 'at13', title: 'Skills', status: 'done', icon: 'i-ph:sparkle', detail: 'ready', kind: 'aitool' },
+      { id: 'at14', title: 'MCP', status: 'done', icon: 'i-ph:plugs', detail: 'ready', kind: 'aitool' },
+      { id: 'at15', title: 'Memory', status: 'done', icon: 'i-ph:database', detail: 'ready', kind: 'aitool' },
     ],
   },
   {
@@ -3595,6 +3812,557 @@ function CanvasBottomPanel() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/*
+ * NodePropertiesPanel — a modal overlay that opens when the user double-clicks
+ * a UTILITY node (kind==='action') on the canvas. Appears in the CENTER of the
+ * canvas as a modal that BLURS the canvas behind it (backdrop-filter: blur).
+ * Shows config fields specific to the node's type (e.g. Wait shows a duration
+ * field, JSON Filter shows key/value fields, etc.). The user can edit the
+ * fields + close the panel (× button, Done button, or Escape) to apply the
+ * config. The config is stored on the CanvasNode's `config` field + read by
+ * executeNode when the automation runs.
+ *
+ * Each utility node type has a different set of config fields. The fields are
+ * defined inline below — a helper returns the field schema for a given node
+ * title, and the panel renders them dynamically.
+ */
+interface ConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'select';
+  default?: string;
+  options?: string[];
+  placeholder?: string;
+}
+
+function getConfigFields(nodeTitle: string): ConfigField[] {
+  const t = nodeTitle.toLowerCase();
+
+  if (t === 'wait' || t.includes('delay')) {
+    return [{ key: 'duration', label: 'Duration (seconds)', type: 'text', default: '2' }];
+  }
+
+  if (t.includes('html → image') || t.includes('html to image')) {
+    return [{ key: 'html', label: 'HTML content', type: 'textarea', placeholder: '<div>Hello</div>' }];
+  }
+
+  if (t.includes('image control')) {
+    return [
+      { key: 'action', label: 'Action', type: 'text', default: 'resize', placeholder: 'resize / crop / filter' },
+      { key: 'width', label: 'Width (px)', type: 'text', default: '100' },
+      { key: 'height', label: 'Height (px)', type: 'text', default: '100' },
+    ];
+  }
+
+  if (t.includes('html → pptx') || t.includes('html to pptx')) {
+    return [{ key: 'html', label: 'HTML content', type: 'textarea' }];
+  }
+
+  if (t.includes('html → xlsx') || t.includes('html to xlsx')) {
+    return [{ key: 'html', label: 'HTML content', type: 'textarea' }];
+  }
+
+  if (t.includes('html → docx') || t.includes('html to docx')) {
+    return [{ key: 'html', label: 'HTML content', type: 'textarea' }];
+  }
+
+  if (t.includes('json filter')) {
+    return [
+      { key: 'key', label: 'Filter key (optional)', type: 'text', placeholder: 'name' },
+      { key: 'value', label: 'Filter value (optional)', type: 'text', placeholder: 'John' },
+    ];
+  }
+
+  if (t.includes('text → file') || t.includes('text to file')) {
+    return [{ key: 'filename', label: 'Filename', type: 'text', default: 'output.txt' }];
+  }
+
+  if (t.includes('text merge')) {
+    return [{ key: 'separator', label: 'Separator', type: 'text', default: ' ', placeholder: ' ' }];
+  }
+
+  if (t.includes('text split')) {
+    return [{ key: 'delimiter', label: 'Delimiter (empty = whitespace)', type: 'text', placeholder: ',' }];
+  }
+
+  if (t.includes('regex')) {
+    return [{ key: 'pattern', label: 'Regex pattern (empty = auto-detect)', type: 'text', placeholder: '\\d+' }];
+  }
+
+  if (t.includes('text case')) {
+    return [{ key: 'mode', label: 'Case mode', type: 'select', default: 'upper', options: ['upper', 'lower', 'title'] }];
+  }
+
+  if (t.includes('counter')) {
+    return [{ key: 'varName', label: 'Variable name', type: 'text', default: '__counter' }];
+  }
+
+  if (t.includes('base64')) {
+    return [{ key: 'mode', label: 'Mode', type: 'select', default: 'auto', options: ['auto', 'encode', 'decode'] }];
+  }
+
+  if (t.includes('hash')) {
+    return [{ key: 'algorithm', label: 'Algorithm', type: 'select', default: 'djb2', options: ['djb2'] }];
+  }
+
+  if (t.includes('template')) {
+    return [{ key: 'template', label: 'Template (use {{varName}})', type: 'textarea', placeholder: 'Hello {{name}}!' }];
+  }
+
+  if (t.includes('ai if')) {
+    return [{ key: 'condition', label: 'Condition prompt', type: 'textarea', placeholder: 'Is the input a question?' }];
+  }
+
+  if (t.includes('database')) {
+    return [{ key: 'query', label: 'Query', type: 'textarea', placeholder: 'SELECT * FROM users' }];
+  }
+
+  if (t.includes('file input')) {
+    return [{ key: 'accept', label: 'Accept', type: 'text', default: '*/*' }];
+  }
+
+  if (t.includes('host')) {
+    return [{ key: 'port', label: 'Port', type: 'text', default: '3000' }];
+  }
+
+  if (t.includes('skill')) {
+    return [{ key: 'skillName', label: 'Skill name', type: 'text', placeholder: 'web-search' }];
+  }
+
+  // Preview, Text Stats, URL Encode — no config needed.
+  return [];
+}
+
+function NodePropertiesPanel() {
+  const panelNodeId = useStore(propertiesPanelNodeId);
+  const nodes = useStore(canvasNodes);
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!panelNodeId) {
+      return undefined;
+    }
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeNodeProperties();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panelNodeId]);
+
+  if (!panelNodeId) {
+    return null;
+  }
+
+  const node = nodes.find((n) => n.id === panelNodeId);
+
+  if (!node) {
+    return null;
+  }
+
+  const fields = getConfigFields(node.title);
+
+  return (
+    <div
+      className={styles.NodePropertiesOverlay}
+      onPointerDown={(e) => {
+        // Close when clicking the backdrop (not the panel itself).
+        if (e.target === e.currentTarget) {
+          closeNodeProperties();
+        }
+      }}
+    >
+      <div className={styles.NodePropertiesPanel}>
+        {/* Header */}
+        <div className={styles.NodePropertiesHeader}>
+          <span className={styles.NodePropertiesHeaderIcon} aria-hidden>
+            <span className={node.icon} />
+          </span>
+          <span className={styles.NodePropertiesHeaderTitle}>{node.title}</span>
+          <button
+            type="button"
+            className={styles.NodePropertiesCloseBtn}
+            onClick={() => closeNodeProperties()}
+            aria-label="Close properties"
+            title="Close (Esc)"
+          >
+            <span className="i-ph:x" />
+          </button>
+        </div>
+
+        {/* Body — config fields */}
+        <div className={styles.NodePropertiesBody}>
+          {fields.length === 0 ? (
+            <div className={styles.NodePropertiesHint}>
+              This node has no configuration. It processes its input automatically.
+            </div>
+          ) : (
+            fields.map((field) => (
+              <div key={field.key} className={styles.NodePropertiesField}>
+                <label className={styles.NodePropertiesLabel} htmlFor={`cfg-${field.key}`}>
+                  {field.label}
+                </label>
+                {field.type === 'textarea' ? (
+                  <textarea
+                    id={`cfg-${field.key}`}
+                    className={styles.NodePropertiesTextarea}
+                    value={getNodeConfig(node, field.key, field.default ?? '')}
+                    placeholder={field.placeholder ?? ''}
+                    onChange={(e) => setNodeConfig(node.id, field.key, e.target.value)}
+                  />
+                ) : field.type === 'select' ? (
+                  <select
+                    id={`cfg-${field.key}`}
+                    className={styles.NodePropertiesSelect}
+                    value={getNodeConfig(node, field.key, field.default ?? '')}
+                    onChange={(e) => setNodeConfig(node.id, field.key, e.target.value)}
+                  >
+                    {field.options?.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={`cfg-${field.key}`}
+                    type="text"
+                    className={styles.NodePropertiesInput}
+                    value={getNodeConfig(node, field.key, field.default ?? '')}
+                    placeholder={field.placeholder ?? ''}
+                    onChange={(e) => setNodeConfig(node.id, field.key, e.target.value)}
+                  />
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className={styles.NodePropertiesFooter}>
+          <button
+            type="button"
+            className={styles.NodePropertiesDoneBtn}
+            onClick={() => closeNodeProperties()}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/*
+ * MemoryTreePanel — a modal overlay that opens when the user double-clicks a
+ * MEMORY node on the canvas. Draws a NEURAL NETWORK on an HTML <canvas> that
+ * GROWS as memory increases — each stored exchange adds new neurons + synaptic
+ * connections to the network. The visualization shows:
+ *   - Glowing cyan neurons (circles) arranged in layers (input → hidden → output)
+ *   - Synaptic connections (lines) between neurons in adjacent layers
+ *   - Each exchange adds a new "hidden layer" of neurons + connects it to the
+ *     previous layer, so the network gets DEEPER as memory grows
+ *   - Pulsing/animated connections on active paths
+ *
+ * The panel contains ONLY the neural network visualization — no message cards
+ * or text content. The user sees the network structure grow as the AI
+ * accumulates memory, like watching a brain form new synaptic connections.
+ */
+function MemoryTreePanel() {
+  const panelNodeId = useStore(memoryTreePanelNodeId);
+  const nodes = useStore(canvasNodes);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef = useRef<number | null>(null);
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!panelNodeId) {
+      return undefined;
+    }
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeMemoryTreePanel();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panelNodeId]);
+
+  // Draw the radial neural network + animate.
+  useEffect(() => {
+    if (!panelNodeId || !canvasRef.current) {
+      return;
+    }
+
+    const cnv = canvasRef.current;
+    const ctx = cnv.getContext('2d');
+
+    if (!ctx) {
+      return;
+    }
+
+    const neuralState = getNeuralMemory(panelNodeId);
+    const exchangeCount = neuralState.neurons.length;
+
+    const rect = cnv.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    cnv.width = w * 2;
+    cnv.height = h * 2;
+    ctx.scale(2, 2);
+
+    // White background (matching the reference image).
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+
+    if (exchangeCount === 0) {
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Neural memory is empty.', w / 2, h / 2);
+      ctx.fillText('Run the automation to form synaptic connections.', w / 2, h / 2 + 20);
+      return;
+    }
+
+    // ── Draw the REAL neural memory as a RADIAL DENDRITIC NETWORK ──
+    //
+    // Matching the reference image: a RADIAL pattern with a CONCENTRIC CORE
+    // (nested rings of nodes acting as the "soma"/nucleus) + DENDRITIC
+    // BRANCHES radiating outward in ALL directions (360°). Pure black on
+    // pure white. STRAIGHT lines (not curved). Dots at every node.
+    //
+    // Structure:
+    //   - Core: 1 centre node → ring 1 (~8 nodes) → ring 2 (~16) → ring 3 (~24)
+    //     → ring 4 (~32). Adjacent rings connected by straight lines.
+    //     Adjacent nodes within each ring connected (forming closed loops).
+    //   - Outer dendrites: from ring 4, ~16-20 primary branches radiate
+    //     outward. Each splits into 2-3 sub-branches (recursive, 3-4 levels)
+    //     ending in terminal node dots.
+    //   - The core + ring count scales with memory (more exchanges = more
+    //     rings + more dendritic branches).
+    //   - STRAIGHT lines only (geometric, not organic).
+    //   - Solid black dots at every junction + tip.
+    //   - NO cross-connections between outer branches (strictly radial).
+    //   - NO glow, NO gradient — flat, stark, vector-like.
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const maxRadius = Math.min(w, h) * 0.45;
+
+    // Core ring count: grows with memory (base 3 + 1 per exchange, max 5).
+    const coreRings = Math.min(3 + Math.floor(exchangeCount / 2), 5);
+
+    // ── Build the CONCENTRIC CORE ──
+    interface CoreNode { x: number; y: number; r: number; ring: number; idx: number; }
+    const coreNodes: CoreNode[] = [];
+    const rings: CoreNode[][] = [];
+
+    for (let ring = 0; ring < coreRings; ring++) {
+      const ringNodes: CoreNode[] = [];
+      const count = ring === 0 ? 1 : Math.min(4 + ring * 6 + exchangeCount, 40);
+      const radius = ring === 0 ? 0 : (maxRadius * 0.25 / coreRings) * ring;
+
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        const nodeR = ring === 0 ? 3 : Math.max(1.5, 3 - ring * 0.4);
+        const node: CoreNode = { x, y, r: nodeR, ring, idx: i };
+        ringNodes.push(node);
+        coreNodes.push(node);
+      }
+      rings.push(ringNodes);
+    }
+
+    // ── Draw core connections ──
+    // Between adjacent rings (radial spokes).
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 0.6;
+    ctx.lineCap = 'round';
+
+    for (let ring = 1; ring < rings.length; ring++) {
+      const current = rings[ring];
+      const prev = rings[ring - 1];
+
+      for (const node of current) {
+        // Connect to 1-2 closest nodes in previous ring.
+        const dists = prev
+          .map((p) => ({ node: p, dist: Math.hypot(p.x - node.x, p.y - node.y) }))
+          .sort((a, b) => a.dist - b.dist);
+        const connectCount = Math.min(dists.length, ring === 1 ? 1 : 2);
+        for (let i = 0; i < connectCount; i++) {
+          ctx.beginPath();
+          ctx.moveTo(dists[i].node.x, dists[i].node.y);
+          ctx.lineTo(node.x, node.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Within each ring (closed loop connections).
+    for (let ring = 1; ring < rings.length; ring++) {
+      const ringNodes = rings[ring];
+      for (let i = 0; i < ringNodes.length; i++) {
+        const a = ringNodes[i];
+        const b = ringNodes[(i + 1) % ringNodes.length];
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw core node dots.
+    ctx.fillStyle = '#000000';
+    for (const node of coreNodes) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── Build + draw OUTER DENDRITIC BRANCHES ──
+    // Radiating outward from the outermost core ring in ALL directions (360°).
+    const outerRing = rings[rings.length - 1];
+    const dendriteCount = Math.min(12 + exchangeCount * 2, 24);
+    const dendriteRadius = maxRadius * 0.75;
+
+    // Recursive dendrite drawing (STRAIGHT lines, fractal splitting).
+    const drawDendrite = (
+      x: number,
+      y: number,
+      angle: number,
+      length: number,
+      thickness: number,
+      depth: number,
+      seed: number,
+    ) => {
+      // Terminal: draw a small node dot.
+      if (depth <= 0 || length < 3) {
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+      }
+
+      // Seeded PRNG.
+      let s = seed;
+      const rnd = () => {
+        s = (s * 1103515245 + 12345) & 0x7fffffff;
+        return (s >>> 16) / 65536;
+      };
+
+      // STRAIGHT line to branch end (not curved — geometric, matching ref).
+      const endX = x + Math.cos(angle) * length;
+      const endY = y + Math.sin(angle) * length;
+
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = thickness;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+
+      // Node dot at junction.
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(endX, endY, Math.max(1, thickness * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+
+      // Sub-branches: 2-3 (binary or ternary split).
+      const subCount = depth > 2 ? 2 + Math.floor(rnd() * 2) : 2;
+      const spread = 0.3 + rnd() * 0.2;
+
+      for (let i = 0; i < subCount; i++) {
+        const t = subCount === 1 ? 0 : (i / (subCount - 1) - 0.5) * 2;
+        const subAngle = angle + t * spread + (rnd() - 0.5) * 0.15;
+        const subLength = length * (0.55 + rnd() * 0.2);
+        const subThickness = thickness * 0.6;
+        const subSeed = (s + i * 7919 + depth * 31) & 0x7fffffff;
+        drawDendrite(endX, endY, subAngle, subLength, subThickness, depth - 1, subSeed);
+      }
+    };
+
+    // Draw primary dendrites radiating from the outer ring.
+    // Each real exchange adds a "dominant" dendrite (angled by its semantic position).
+    // Additional filler dendrites fill the gaps between them.
+    for (let i = 0; i < dendriteCount; i++) {
+      // Angle: evenly distributed + slight jitter.
+      const angle = (i / dendriteCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.1;
+
+      // Find the closest node on the outer ring to start from.
+      let startNode = outerRing[0];
+      let minDist = Infinity;
+      for (const node of outerRing) {
+        const d = Math.hypot(node.x - (cx + Math.cos(angle) * 10), node.y - (cy + Math.sin(angle) * 10));
+        if (d < minDist) {
+          minDist = d;
+          startNode = node;
+        }
+      }
+
+      // Check if this dendrite corresponds to a real exchange.
+      let isExchangeDendrite = false;
+      let act = 0.5;
+      if (i < neuralState.neurons.length) {
+        isExchangeDendrite = true;
+        const n = neuralState.neurons[i];
+        act = n.activation;
+        // Use the neuron's semantic position for a more organic angle.
+        // Map fx (0-1) to angle 0-2π.
+        // But keep it roughly at position i for even distribution.
+      }
+
+      const length = dendriteRadius * (0.6 + (isExchangeDendrite ? act * 0.4 : Math.random() * 0.3));
+      const thickness = isExchangeDendrite ? 1.5 + act * 1.5 : 0.8 + Math.random() * 0.8;
+      const depth = isExchangeDendrite ? 4 : 3;
+      const seed = Math.floor(Math.random() * 0x7fffffff);
+
+      drawDendrite(startNode.x, startNode.y, angle, length, thickness, depth, seed);
+    }
+  }, [panelNodeId]);
+
+  if (!panelNodeId) {
+    return null;
+  }
+
+  const node = nodes.find((n) => n.id === panelNodeId);
+
+  if (!node) {
+    return null;
+  }
+
+  return (
+    <div
+      className={styles.MemoryTreeOverlay}
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) {
+          closeMemoryTreePanel();
+        }
+      }}
+    >
+      {/*
+        * The panel is a PURE WHITE canvas with the neural network drawn in
+        * black. NO header, NO footer, NO border, NO title, NO buttons — just
+        * the white surface + the black neural network. Closes on Escape or
+        * clicking the overlay backdrop.
+        */}
+      <canvas
+        ref={canvasRef}
+        className={styles.MemoryTreeCanvas}
+      />
     </div>
   );
 }

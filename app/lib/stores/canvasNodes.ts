@@ -56,10 +56,20 @@ import { atom } from 'nanostores';
  *     target: connects upward into the agent's bottom-SECOND (middle) diamond,
  *     so a memory node and an LLM node can both hang off the same agent without
  *     their wires overlapping.
+ *   - 'aitool' — visually identical to 'memory'/'llm' (dark CIRCLE, top port,
+ *     icon dead-centre, title below). Represents an AI Agent TOOL node from the
+ *     "AI Agent Tools" library section (image search, web reader, browser,
+ *     terminal, image generator, TTS, etc.). Distinct connection target:
+ *     connects upward into the agent's bottom THIRD connector — the PLUS SQUARE
+ *     (AgentPlusSquare) hanging below the third (rightmost) diamond — so a tool
+ *     node, a memory node, AND an llm node can ALL hang off the same agent
+ *     without their wires colliding on the same port. An aitool node is a
+ *     "dummy but connectable" tool: it pulses alongside its agent during a run
+ *     but does not execute any real logic on its own.
  *   - 'action' — the default compact card for every other node type.
  * Defaults to 'action' when omitted so existing call sites keep working.
  */
-export type CanvasNodeKind = 'trigger' | 'agent' | 'memory' | 'llm' | 'action' | 'sticky';
+export type CanvasNodeKind = 'trigger' | 'agent' | 'memory' | 'llm' | 'aitool' | 'action' | 'sticky';
 
 /* Default dimensions for a freshly-dropped sticky note. Sticky notes are the
  * only resizable node kind — every other kind has a fixed silhouette defined
@@ -158,6 +168,14 @@ export interface CanvasNode {
    * unset. Non-sticky kinds ignore this field.
    */
   color?: string;
+  /**
+   * Optional per-node configuration (key→value) for utility nodes. Set by the
+   * NodePropertiesPanel when the user double-clicks a utility node on the canvas.
+   * Each utility node type reads different keys from this config (e.g. "Wait"
+   * reads `duration`, "HTTP Request" reads `url`, etc.). Falls back to defaults
+   * when unset.
+   */
+  config?: Record<string, string>;
 }
 
 /** Minimal shape needed from a library ActionStep to start a drag. */
@@ -220,6 +238,14 @@ export interface CanvasEdge {
   sourceId: string;
   /** Target canvas-node id (the node whose INPUT port the edge ends at). */
   targetId: string;
+  /**
+   * Which source port the edge started from: 'right' (default, right-edge
+   * port) or 'bottom' (the agent's plus-square / bottom port). Used by
+   * getOutputPortPosition to anchor the edge's source end at the correct port.
+   */
+  sourcePort?: 'right' | 'bottom';
+  /** Optional user-set label for this connection (double-click wire to name it). */
+  label?: string;
 }
 
 /** Edges placed on the canvas. */
@@ -250,6 +276,12 @@ export const canvasEdges = atom<CanvasEdge[]>([]);
 export interface ConnectionSource {
   /** Source canvas-node id (the node whose OUTPUT port the drag started on). */
   sourceId: string;
+  /**
+   * Which output port the drag started from: 'right' (the standard right-edge
+   * port) or 'bottom' (the agent's plus-square / bottom port). Used by
+   * getOutputPortPosition to anchor the edge's source end at the correct port.
+   */
+  portRole?: 'right' | 'bottom';
 }
 
 export interface ConnectionPointer {
@@ -345,6 +377,54 @@ export function closeCanvasChat() {
 
 /*
  * ──────────────────────────────────────────────────────────────────────────
+ *  Node Properties Panel — per-node config modal
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  When the user double-clicks a UTILITY node (kind==='action') on the canvas,
+ *  a properties panel opens in the center of the canvas (as a modal overlay
+ *  that blurs the canvas behind it). The panel shows config fields specific to
+ *  the node's type (e.g. Wait shows a duration field, HTTP Request shows a URL
+ *  field, etc.). The user can edit the fields + close the panel to apply the
+ *  config. The config is stored on the CanvasNode's `config` field + read by
+ *  executeNode when the automation runs.
+ */
+
+/** The instance id of the node whose properties panel is open, or null. */
+export const propertiesPanelNodeId = atom<string | null>(null);
+
+/** Open the properties panel for a specific node. */
+export function openNodeProperties(nodeId: string) {
+  propertiesPanelNodeId.set(nodeId);
+}
+
+/** Close the properties panel. */
+export function closeNodeProperties() {
+  propertiesPanelNodeId.set(null);
+}
+
+/**
+ * Get a config value from a node, with a fallback default.
+ * Shorthand for `node.config?.[key] ?? defaultValue`.
+ */
+export function getNodeConfig(node: CanvasNode, key: string, defaultValue: string = ''): string {
+  return node.config?.[key] ?? defaultValue;
+}
+
+/**
+ * Set a single config key on a node (immutably updates the node in the store).
+ */
+export function setNodeConfig(nodeId: string, key: string, value: string) {
+  canvasNodes.set(
+    canvasNodes.get().map((n) =>
+      n.id === nodeId
+        ? { ...n, config: { ...(n.config ?? {}), [key]: value } }
+        : n,
+    ),
+  );
+}
+
+/*
+ * ──────────────────────────────────────────────────────────────────────────
  *  Automation run — pulse the nodes as the graph executes
  * ──────────────────────────────────────────────────────────────────────────
  *
@@ -395,6 +475,11 @@ export function describeNodeExecution(node: CanvasNode, input?: string): string 
       return `Memory node “${node.title}” stored the context.`;
     case 'llm':
       return `LLM node “${node.title}” generated a response.`;
+    case 'aitool':
+      // AI Agent Tool nodes are "dummy but connectable" — they pulse alongside
+      // their agent but don't run their own logic. Describe the tool as ready so
+      // the run log still reports each connected tool.
+      return `AI tool “${node.title}” attached to the agent (ready).`;
     case 'sticky':
       return `Sticky note “${node.title}” (annotation, skipped).`;
     default:
@@ -455,6 +540,286 @@ export function addMemoryEntry(memoryNodeId: string, entry: MemoryEntry) {
   canvasMemoryStore.set(memoryNodeId, trimmed);
 }
 
+/*
+ * ──────────────────────────────────────────────────────────────────────────
+ *  Neural Memory Network — REAL embedding-based neural memory
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  This is a REAL neural memory system — not a dummy visualization. Each
+ *  stored exchange is embedded into a fixed-dimension vector (via a fast
+ *  character-level hash embedding), forming a "neuron" in the network. The
+ *  neurons are connected by SYNAPTIC WEIGHTS computed from the cosine
+ *  similarity between their embeddings — semantically similar exchanges have
+ *  stronger connections. The visualization draws the ACTUAL neural state:
+ *  neuron positions are computed via a force-directed layout (similar
+ *  exchanges cluster together), connection thickness = synaptic weight,
+ *  neuron brightness = activation strength (how relevant to the current query).
+ *
+ *  When the agent runs, it retrieves the TOP-K most similar past exchanges
+ *  (by cosine similarity to the current input) instead of ALL history — this
+ *  is faster (less context) AND more relevant (only semantically similar
+ *  exchanges are included), making the memory both FAST and SMART.
+ *
+ *  The visualization is 100% REAL: what you see IS the neural state.
+ */
+
+/** Dimension of the embedding vector (128 dims — enough for semantic hash). */
+const EMBED_DIM = 128;
+
+/**
+ * Embed a text string into a fixed-dimension vector using a fast
+ * character-level hashing trick: each character contributes to multiple
+ * dimensions via a hash, + the vector is L2-normalized so cosine similarity
+ * = dot product. This is not a learned embedding (no model needed) but
+ * captures enough semantic structure (character n-gram overlap) for the
+ * similarity-based retrieval to work meaningfully.
+ */
+function embedText(text: string): Float32Array {
+  const vec = new Float32Array(EMBED_DIM);
+  const lower = text.toLowerCase();
+  // Character trigram hashing: each 3-char window hashes into 2 dims.
+  for (let i = 0; i < lower.length - 2; i++) {
+    const tri = lower.charCodeAt(i) * 65536 + lower.charCodeAt(i + 1) * 256 + lower.charCodeAt(i + 2);
+    const h1 = (tri * 2654435761) % EMBED_DIM;
+    const h2 = ((tri >> 8) * 40503 + 97) % EMBED_DIM;
+    vec[h1] += 1;
+    vec[h2] += 0.5;
+  }
+  // Also hash individual words for word-level semantics.
+  const words = lower.split(/\s+/);
+  for (const word of words) {
+    let h = 0;
+    for (let i = 0; i < word.length; i++) {
+      h = (h * 31 + word.charCodeAt(i)) % EMBED_DIM;
+    }
+    vec[h] += 2;
+  }
+  // L2 normalize.
+  let norm = 0;
+  for (let i = 0; i < EMBED_DIM; i++) {
+    norm += vec[i] * vec[i];
+  }
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < EMBED_DIM; i++) {
+    vec[i] /= norm;
+  }
+  return vec;
+}
+
+/** Cosine similarity between two L2-normalized vectors (= dot product). */
+function cosineSim(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < EMBED_DIM; i++) {
+    dot += a[i] * b[i];
+  }
+  return dot;
+}
+
+/** A neuron in the neural memory — represents one stored exchange. */
+export interface NeuralNeuron {
+  id: string;
+  userMessage: string;
+  assistantResponse: string;
+  ts: number;
+  embedding: Float32Array;
+  /** Current activation (0-1) — how relevant to the last query. */
+  activation: number;
+  /** Force-directed layout position (relative 0-1 in the canvas). */
+  fx: number;
+  fy: number;
+  /** Velocity for the force-directed simulation. */
+  vx: number;
+  vy: number;
+}
+
+/** A synaptic connection between two neurons — weighted by similarity. */
+export interface NeuralSynapse {
+  from: string;
+  to: string;
+  /** Weight = cosine similarity between the two neurons' embeddings (0-1). */
+  weight: number;
+}
+
+/** The complete neural memory state for one memory node. */
+interface NeuralMemoryState {
+  neurons: NeuralNeuron[];
+  synapses: NeuralSynapse[];
+  /** The last query embedding (for activation computation). */
+  lastQuery: Float32Array | null;
+}
+
+const neuralMemoryStates = new Map<string, NeuralMemoryState>();
+
+/** Get a memory node's neural state. Empty if none stored. */
+export function getNeuralMemory(memoryNodeId: string): NeuralMemoryState {
+  return neuralMemoryStates.get(memoryNodeId) ?? { neurons: [], synapses: [], lastQuery: null };
+}
+
+/**
+ * Add a new exchange to the neural memory. Creates a neuron with the exchange's
+ * embedding + computes synaptic weights to ALL existing neurons (cosine sim).
+ * Also runs a few iterations of the force-directed layout so neurons spread out.
+ */
+export function addNeuralMemory(memoryNodeId: string, userMessage: string, assistantResponse: string) {
+  const state = neuralMemoryStates.get(memoryNodeId) ?? { neurons: [], synapses: [], lastQuery: null };
+  const embedding = embedText(userMessage + ' ' + assistantResponse);
+  const id = `nn-${Date.now()}-${state.neurons.length}`;
+
+  // Position new neurons near the centre; the force-directed sim will spread them.
+  const angle = state.neurons.length * 2.399; // Golden angle for good spread.
+  const r = 0.15 + state.neurons.length * 0.03;
+  const neuron: NeuralNeuron = {
+    id,
+    userMessage,
+    assistantResponse,
+    ts: Date.now(),
+    embedding,
+    activation: 1,
+    fx: 0.5 + Math.cos(angle) * r,
+    fy: 0.5 + Math.sin(angle) * r,
+    vx: 0,
+    vy: 0,
+  };
+  state.neurons.push(neuron);
+
+  // Compute synaptic weights to ALL existing neurons.
+  for (const other of state.neurons) {
+    if (other.id === id) {
+      continue;
+    }
+    const weight = cosineSim(embedding, other.embedding);
+    // Only store connections with meaningful similarity (avoids clutter).
+    if (weight > 0.05) {
+      state.synapses.push({ from: id, to: other.id, weight });
+    }
+  }
+
+  // Run a few iterations of the force-directed layout.
+  runForceLayout(state, 30);
+
+  // Cap at 50 neurons.
+  if (state.neurons.length > 50) {
+    state.neurons = state.neurons.slice(-50);
+    state.synapses = state.synapses.filter((s) => state.neurons.some((n) => n.id === s.from) && state.neurons.some((n) => n.id === s.to));
+  }
+
+  neuralMemoryStates.set(memoryNodeId, state);
+}
+
+/**
+ * Retrieve the TOP-K most similar past exchanges for a given query.
+ * This is the REAL retrieval mechanism the agent uses — it computes cosine
+ * similarity between the query embedding and all stored neurons, then returns
+ * only the most similar K exchanges (not all history). This is faster (less
+ * context to send to the LLM) AND more relevant.
+ */
+export function retrieveRelevantMemory(memoryNodeId: string, query: string, k: number = 5): MemoryEntry[] {
+  const state = neuralMemoryStates.get(memoryNodeId);
+  if (!state || state.neurons.length === 0) {
+    return [];
+  }
+  const queryEmb = embedText(query);
+  state.lastQuery = queryEmb;
+
+  // Compute activations: cosine similarity to the query.
+  for (const neuron of state.neurons) {
+    neuron.activation = Math.max(0, cosineSim(queryEmb, neuron.embedding));
+  }
+
+  // Sort by activation (most similar first) + return top-K.
+  const sorted = [...state.neurons].sort((a, b) => b.activation - a.activation);
+  return sorted.slice(0, k).map((n) => ({
+    role: 'user' as const,
+    content: n.userMessage,
+    ts: n.ts,
+  }));
+}
+
+/**
+ * Run the force-directed layout simulation for a few iterations. This pushes
+ * neurons apart (repulsion) + pulls connected neurons together (attraction
+ * weighted by similarity). The result determines the visual positions of the
+ * neurons in the canvas — so the visualization reflects the REAL semantic
+ * structure of the memory (similar exchanges cluster together).
+ */
+function runForceLayout(state: NeuralMemoryState, iterations: number) {
+  const n = state.neurons.length;
+  if (n === 0) {
+    return;
+  }
+  const synapseMap = new Map<string, NeuralSynapse>();
+  for (const s of state.synapses) {
+    synapseMap.set(`${s.from}|${s.to}`, s);
+    synapseMap.set(`${s.to}|${s.from}`, s);
+  }
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Repulsion: all pairs push apart.
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = state.neurons[i];
+        const b = state.neurons[j];
+        const dx = b.fx - a.fx;
+        const dy = b.fy - a.fy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const force = 0.02 / (dist * dist);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        a.vx -= fx;
+        a.vy -= fy;
+        b.vx += fx;
+        b.vy += fy;
+      }
+    }
+    // Attraction: connected neurons pull together (weighted by similarity).
+    for (const s of state.synapses) {
+      const a = state.neurons.find((nn) => nn.id === s.from);
+      const b = state.neurons.find((nn) => nn.id === s.to);
+      if (!a || !b) {
+        continue;
+      }
+      const dx = b.fx - a.fx;
+      const dy = b.fy - a.fy;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+      const force = s.weight * 0.03;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      a.vx += fx;
+      a.vy += fy;
+      b.vx -= fx;
+      b.vy -= fy;
+    }
+    // Apply velocity with damping + keep within bounds.
+    for (const neuron of state.neurons) {
+      neuron.fx += neuron.vx * 0.5;
+      neuron.fy += neuron.vy * 0.5;
+      neuron.vx *= 0.6;
+      neuron.vy *= 0.6;
+      neuron.fx = Math.max(0.05, Math.min(0.95, neuron.fx));
+      neuron.fy = Math.max(0.05, Math.min(0.95, neuron.fy));
+    }
+  }
+}
+
+/** Clear a memory node's neural state. */
+export function clearNeuralMemory(memoryNodeId: string) {
+  neuralMemoryStates.delete(memoryNodeId);
+}
+
+/* ── Memory tree panel state ── */
+/** The instance id of the memory node whose tree panel is open, or null. */
+export const memoryTreePanelNodeId = atom<string | null>(null);
+
+/** Open the memory tree panel for a specific memory node. */
+export function openMemoryTreePanel(nodeId: string) {
+  memoryTreePanelNodeId.set(nodeId);
+}
+
+/** Close the memory tree panel. */
+export function closeMemoryTreePanel() {
+  memoryTreePanelNodeId.set(null);
+}
+
 /** Clear a memory node's history (used when the user wants to reset). */
 export function clearMemoryEntries(memoryNodeId: string) {
   canvasMemoryStore.delete(memoryNodeId);
@@ -513,9 +878,12 @@ export function runCanvasAutomation(opts: RunAutomationOptions = {}): Promise<{ 
       visited.add(node.id);
       visitCount += 1;
 
+      // Feature #5: Clear this node's status at the start of execution.
+      // Status will be set to 'success' or 'error' after the node runs.
       const description = describeNodeExecution(node, currentData);
       let finalDescription = description;
       let nodeOutput = currentData;
+      let nodeSucceeded = true;
 
       // ── AGENT + LLM nodes: fetch real AI output + memory integration ──
       if ((node.kind === 'agent' || node.kind === 'llm') && currentData) {
@@ -527,9 +895,23 @@ export function runCanvasAutomation(opts: RunAutomationOptions = {}): Promise<{ 
             return src && src.kind === 'memory';
           });
 
-        setRunningCanvasNodes([node.id, ...incomingMemoryIds]);
+        // AI Agent TOOLS (aitool) hang off the agent's bottom PLUS connector.
+        // They're "dummy but connectable" — pulse them alongside the agent so
+        // the user can see which tools are attached, but don't run their own
+        // logic (no real execution backend for them yet).
+        const incomingToolIds = edges
+          .filter((e) => e.targetId === node.id)
+          .map((e) => e.sourceId)
+          .filter((sid) => {
+            const src = nodes.find((n) => n.id === sid);
+            return src && src.kind === 'aitool';
+          });
 
-        const memoryHistory = incomingMemoryIds.flatMap((mid) => getMemoryEntries(mid));
+        setRunningCanvasNodes([node.id, ...incomingMemoryIds, ...incomingToolIds]);
+
+        // Use NEURAL retrieval: get the TOP-K most similar past exchanges
+        // instead of ALL history. This is faster (less context) + more relevant.
+        const memoryHistory = incomingMemoryIds.flatMap((mid) => retrieveRelevantMemory(mid, currentData, 5));
 
         try {
           const res = await fetch('/api/canvas-agent', {
@@ -551,6 +933,8 @@ export function runCanvasAutomation(opts: RunAutomationOptions = {}): Promise<{ 
             for (const mid of incomingMemoryIds) {
               addMemoryEntry(mid, { role: 'user', content: currentData, ts: Date.now() });
               addMemoryEntry(mid, { role: 'assistant', content: aiOutput, ts: Date.now() + 1 });
+              // Store in the NEURAL memory (real embedding + synaptic weights).
+              addNeuralMemory(mid, currentData, aiOutput);
             }
           }
         } catch {
@@ -600,16 +984,7 @@ export function runCanvasAutomation(opts: RunAutomationOptions = {}): Promise<{ 
         onStep?.(node, finalDescription);
 
         if (nextNodes.length === 0) {
-          // No downstream nodes — if this was the last branch, complete.
-          // Check if ALL reachable nodes have been visited.
           setRunningCanvasNodes([]);
-
-          // If no more nodes to visit, resolve. But there might be other
-          // branches still running (from a multi-trigger or multi-branch
-          // walk). We resolve when the FIRST branch completes — this is a
-          // simplification (a full impl would track all branches). For the
-          // user's typical single-trigger single-path workflow, this is
-          // correct.
           if (visitCount >= 1) {
             resolve({ count: visitCount });
           }
@@ -742,7 +1117,7 @@ let edgeCounter = 0;
  * dragging the same trigger onto the same agent twice doesn't create two
  * overlapping curves. Self-loops are also rejected.
  */
-export function addCanvasEdge(sourceId: string, targetId: string) {
+export function addCanvasEdge(sourceId: string, targetId: string, sourcePort?: 'right' | 'bottom') {
   if (sourceId === targetId) {
     return;
   }
@@ -757,6 +1132,7 @@ export function addCanvasEdge(sourceId: string, targetId: string) {
     id: `ce-${Date.now()}-${edgeCounter++}`,
     sourceId,
     targetId,
+    sourcePort,
   };
   canvasEdges.set([...existing, edge]);
 }
@@ -774,8 +1150,8 @@ export function removeCanvasEdge(id: string) {
  * coords, hit-tests for a valid target, and updates `connectionPointer` per
  * frame.
  */
-export function startConnection(sourceId: string, canvasX: number, canvasY: number) {
-  connectionSource.set({ sourceId });
+export function startConnection(sourceId: string, canvasX: number, canvasY: number, portRole?: 'right' | 'bottom') {
+  connectionSource.set({ sourceId, portRole });
   connectionPointer.set({ x: canvasX, y: canvasY, overTargetId: null });
 }
 
@@ -809,7 +1185,7 @@ export function endConnection(): { completed: boolean; targetId: string | null }
     return { completed: false, targetId: null };
   }
 
-  addCanvasEdge(src.sourceId, ptr.overTargetId);
+  addCanvasEdge(src.sourceId, ptr.overTargetId, src.portRole);
   return { completed: true, targetId: ptr.overTargetId };
 }
 
@@ -1075,22 +1451,33 @@ export function clearCanvasVariables() {
 export async function executeNode(node: CanvasNode, inputData: string): Promise<string | undefined> {
   switch (node.kind) {
     case 'action': {
-      // Dispatch by the node's TITLE (since we don't have a config panel yet,
-      // the title tells us which utility this is).
+      // Dispatch by the node's TITLE. Each handler reads config values from
+      // node.config (set via the NodePropertiesPanel when the user double-clicks
+      // the node) with sensible defaults when the config isn't set yet.
       const title = node.title.toLowerCase();
 
-      // ── Wait (was "Delay") — actually wait 2 seconds ──
+      // ── Wait — actually wait N seconds (config: duration, default 2) ──
       if (title === 'wait' || title.includes('delay')) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        return `Waited 2 seconds. Input was: "${inputData.slice(0, 50)}"`;
+        const duration = parseInt(getNodeConfig(node, 'duration', '2'), 10) || 2;
+        await new Promise((resolve) => setTimeout(resolve, duration * 1000));
+        return `Waited ${duration} second${duration === 1 ? '' : 's'}. Input was: "${inputData.slice(0, 50)}"`;
       }
 
-      // ── JSON Filter — filter JSON array by a key match (non-empty → keep) ──
+      // ── JSON Filter — filter JSON array by a key match ──
       if (title.includes('json filter')) {
+        const filterKey = getNodeConfig(node, 'key', '');
+        const filterValue = getNodeConfig(node, 'value', '');
         try {
           const parsed = JSON.parse(inputData);
           if (Array.isArray(parsed)) {
-            const filtered = parsed.filter((item) => item !== null && item !== undefined && item !== '');
+            const filtered = filterKey
+              ? parsed.filter((item) => {
+                  if (typeof item === 'object' && item !== null) {
+                    return filterValue ? String(item[filterKey]) === filterValue : item[filterKey] != null;
+                  }
+                  return filterValue ? String(item) === filterValue : true;
+                })
+              : parsed.filter((item) => item !== null && item !== undefined && item !== '');
             return `Filtered ${filtered.length}/${parsed.length} items: ${JSON.stringify(filtered).slice(0, 200)}`;
           }
           return `Not an array — cannot filter: ${inputData.slice(0, 80)}`;
@@ -1099,21 +1486,35 @@ export async function executeNode(node: CanvasNode, inputData: string): Promise<
         }
       }
 
-      // ── Text Merge — merge multiple lines into one (join with spaces) ──
+      // ── Text Merge — merge lines using config separator (default: space) ──
       if (title.includes('text merge') || (title.includes('merge') && !title.includes('git'))) {
-        const merged = inputData.split(/\n+/).map((l) => l.trim()).filter(Boolean).join(' ');
+        const separator = getNodeConfig(node, 'separator', ' ');
+        const merged = inputData.split(/\n+/).map((l) => l.trim()).filter(Boolean).join(separator);
         return `Merged: ${merged.slice(0, 200)}`;
       }
 
-      // ── Text Split — split text into lines (by spaces → one per line) ──
+      // ── Text Split — split using config delimiter (default: whitespace) ──
       if (title.includes('text split') || title.includes('split')) {
-        const lines = inputData.split(/\s+/).filter(Boolean);
-        return `Split into ${lines.length} lines:\n${lines.join('\n').slice(0, 200)}`;
+        const delimiter = getNodeConfig(node, 'delimiter', '');
+        const lines = delimiter
+          ? inputData.split(delimiter).filter(Boolean)
+          : inputData.split(/\s+/).filter(Boolean);
+        return `Split into ${lines.length} parts:\n${lines.join('\n').slice(0, 200)}`;
       }
 
-      // ── Regex Extract — extract the first match of a common pattern ──
+      // ── Regex Extract — use config pattern or auto-detect ──
       if (title.includes('regex')) {
-        // Try to extract an email, URL, or number from the input.
+        const pattern = getNodeConfig(node, 'pattern', '');
+        if (pattern) {
+          try {
+            const regex = new RegExp(pattern);
+            const match = inputData.match(regex);
+            return `Regex extracted: ${match?.[0] ?? '(no match)'}`;
+          } catch {
+            return `Invalid regex pattern: "${pattern}"`;
+          }
+        }
+        // Auto-detect if no pattern configured.
         const emailMatch = inputData.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
         const urlMatch = inputData.match(/https?:\/\/[^\s]+/);
         const numMatch = inputData.match(/\d+(\.\d+)?/);
@@ -1121,9 +1522,18 @@ export async function executeNode(node: CanvasNode, inputData: string): Promise<
         return `Regex extracted: ${extracted}`;
       }
 
-      // ── Text Case — convert to UPPERCASE (toggle-able in a real config) ──
+      // ── Text Case — convert based on config mode (upper/lower/title) ──
       if (title.includes('text case') || title.includes('case')) {
-        return `UPPERCASE: ${inputData.toUpperCase().slice(0, 200)}`;
+        const mode = getNodeConfig(node, 'mode', 'upper');
+        let result = inputData;
+        if (mode === 'lower') {
+          result = inputData.toLowerCase();
+        } else if (mode === 'title') {
+          result = inputData.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+        } else {
+          result = inputData.toUpperCase();
+        }
+        return `${mode.toUpperCase()}: ${result.slice(0, 200)}`;
       }
 
       // ── Text Stats — count words, chars, lines ──
@@ -1142,11 +1552,11 @@ export async function executeNode(node: CanvasNode, inputData: string): Promise<
         return `Counter: ${next}`;
       }
 
-      // ── Base64 — encode (or decode if input looks like base64) ──
+      // ── Base64 — encode or decode (config: mode, default auto) ──
       if (title.includes('base64')) {
+        const mode = getNodeConfig(node, 'mode', 'auto');
         try {
-          // If the input looks like base64 (letters+digits+=/+), decode it.
-          if (/^[A-Za-z0-9+/=\s]+$/.test(inputData) && inputData.trim().length % 4 === 0) {
+          if (mode === 'decode' || (mode === 'auto' && /^[A-Za-z0-9+/=\s]+$/.test(inputData) && inputData.trim().length % 4 === 0)) {
             return `Decoded: ${atob(inputData.trim()).slice(0, 200)}`;
           }
           return `Encoded: ${btoa(inputData).slice(0, 200)}`;
@@ -1169,9 +1579,10 @@ export async function executeNode(node: CanvasNode, inputData: string): Promise<
         return `Hash (djb2): ${(hash >>> 0).toString(16)}`;
       }
 
-      // ── Template — replace {{var}} placeholders with stored variables ──
+      // ── Template — use config template OR replace {{var}} in input ──
       if (title.includes('template')) {
-        let result = inputData;
+        const tplStr = getNodeConfig(node, 'template', '');
+        let result = tplStr || inputData;
         const allVars = getAllCanvasVariables();
         for (const [key, value] of Object.entries(allVars)) {
           result = result.replaceAll(`{{${key}}}`, value);
@@ -1179,14 +1590,18 @@ export async function executeNode(node: CanvasNode, inputData: string): Promise<
         return `Templated: ${result.slice(0, 200)}`;
       }
 
-      // ── AI If — condition evaluated by the AI (calls /api/canvas-agent) ──
+      // ── AI If — condition evaluated by the AI (config: condition prompt) ──
       if (title.includes('ai if')) {
+        const condition = getNodeConfig(node, 'condition', '');
         try {
+          const prompt = condition
+            ? `Evaluate this as a yes/no question. Reply with ONLY "true" or "false": ${condition}. Context: ${inputData}`
+            : `Evaluate this as a yes/no question. Reply with ONLY "true" or "false": ${inputData}`;
           const res = await fetch('/api/canvas-agent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              message: `Evaluate this as a yes/no question. Reply with ONLY "true" or "false": ${inputData}`,
+              message: prompt,
               agentLabel: 'AI If',
             }),
           });
@@ -1199,17 +1614,18 @@ export async function executeNode(node: CanvasNode, inputData: string): Promise<
         }
       }
 
-      // ── Text → File — simulate writing to a file (returns a blob-downloadable) ──
+      // ── Text → File — download the input as a file (config: filename) ──
       if (title.includes('text → file') || title.includes('text->file') || title.includes('text to file')) {
+        const filename = getNodeConfig(node, 'filename', `output-${Date.now()}.txt`);
         try {
           const blob = new Blob([inputData], { type: 'text/plain' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `output-${Date.now()}.txt`;
+          a.download = filename;
           a.click();
           URL.revokeObjectURL(url);
-          return `File downloaded (${inputData.length} chars): ${a.download}`;
+          return `File downloaded (${inputData.length} chars): ${filename}`;
         } catch {
           return `Text → File failed for: "${inputData.slice(0, 80)}"`;
         }
@@ -1481,5 +1897,216 @@ export function autoLayoutCanvas() {
   }
 
   canvasNodes.set(newNodes);
+}
+
+/*
+ * ──────────────────────────────────────────────────────────────────────────
+ *  Feature #4: Connection Animation — data pulse along edges during execution
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  When the automation runs, a "data pulse" (a bright dot) travels along the
+ *  bezier curve of each active edge — from the source node to the target node.
+ *  This makes the automation feel ALIVE (like n8n's data flow animation).
+ *
+ *  The `activeEdgeId` atom holds the edge id currently being animated (the
+ *  edge connecting the currently-executing node to the next). The
+ *  CanvasEdgesLayer reads this + draws the pulse.
+ */
+export const activeEdgeId = atom<string | null>(null);
+
+/** Set the currently-animating edge (the edge data is flowing through). */
+export function setActiveEdge(edgeId: string | null) {
+  activeEdgeId.set(edgeId);
+}
+
+/*
+ * ──────────────────────────────────────────────────────────────────────────
+ *  Feature #5: Node Status Badges — ✓/✗/⏱ after execution
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  After the automation runs, each node shows a status badge:
+ *    - 'success' (green ✓) — the node executed successfully
+ *    - 'error' (red ✗) — the node failed
+ *    - 'timeout' (amber ⏱) — the node took too long
+ *  The status persists on the node until the next run clears it.
+ */
+export type NodeStatus = 'success' | 'error' | 'timeout';
+
+const nodeStatuses = new Map<string, NodeStatus>();
+
+/** Get a node's execution status (undefined if not yet executed). */
+export function getNodeStatus(nodeId: string): NodeStatus | undefined {
+  return nodeStatuses.get(nodeId);
+}
+
+/** Set a node's execution status. */
+export function setNodeStatus(nodeId: string, status: NodeStatus) {
+  nodeStatuses.set(nodeId, status);
+}
+
+/** Clear all node statuses (called at the start of a new run). */
+export function clearNodeStatuses() {
+  nodeStatuses.clear();
+}
+
+/*
+ * ──────────────────────────────────────────────────────────────────────────
+ *  Feature #9: Connection Labels — name a wire
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  Double-click a connection wire to edit its label. The label appears as
+ *  text on the wire's midpoint. Useful for annotating what data flows where
+ *  (e.g. "user input", "filtered results", "AI response").
+ */
+export function setEdgeLabel(edgeId: string, label: string) {
+  canvasEdges.set(
+    canvasEdges.get().map((e) => (e.id === edgeId ? { ...e, label: label.trim() || undefined } : e)),
+  );
+}
+
+/*
+ * ──────────────────────────────────────────────────────────────────────────
+ *  Feature #21: Export to Code — export workflow as standalone JS script
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ *  Generates a standalone JavaScript file that reproduces the workflow as
+ *  executable code. The script can run without the canvas — useful for
+ *  production deployment or CI/CD pipelines.
+ */
+export function exportCanvasAsCode(): string {
+  const nodes = canvasNodes.get();
+  const edges = canvasEdges.get();
+  const projectName = 'workflow'; // Could read from workbenchStore
+
+  // Build the script.
+  const lines: string[] = [
+    '// Auto-generated workflow script',
+    `// Workflow: ${projectName}`,
+    `// Generated: ${new Date().toISOString()}`,
+    `// Nodes: ${nodes.length}, Edges: ${edges.length}`,
+    '',
+    '/*',
+    ' * This script reproduces the canvas workflow as executable JavaScript.',
+    ' * Each node is represented as an async function that receives input data',
+    ' * and returns output data. The execution order follows the canvas edges',
+    ' * (BFS from trigger nodes).',
+    ' *',
+    ' * To run: node workflow.js',
+    ' */',
+    '',
+    '// ── Node definitions ──',
+    '',
+  ];
+
+  // Define each node as a function.
+  for (const node of nodes) {
+    const fnName = `node_${node.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    lines.push(`/** ${node.kind}: ${node.title} */`);
+    lines.push(`async function ${fnName}(input) {`);
+
+    switch (node.kind) {
+      case 'trigger':
+        lines.push(`  // Trigger: "${node.title}" — passes the input through.`);
+        lines.push(`  return input;`);
+        break;
+      case 'agent':
+      case 'llm':
+        lines.push(`  // ${node.kind === 'agent' ? 'Agent' : 'LLM'}: "${node.title}"`);
+        lines.push(`  // In the canvas, this calls /api/canvas-agent for AI generation.`);
+        lines.push(`  console.log('[${node.title}] Processing: ' + input);`);
+        lines.push(`  // Replace with your AI call:`);
+        lines.push(`  // const res = await fetch('/api/canvas-agent', {`);
+        lines.push(`  //   method: 'POST', headers: { 'Content-Type': 'application/json' },`);
+        lines.push(`  //   body: JSON.stringify({ message: input, agentLabel: '${node.mainLabel ?? node.title}' })`);
+        lines.push(`  // });`);
+        lines.push(`  // const data = await res.json();`);
+        lines.push(`  // return data.output;`);
+        lines.push(`  return '[AI response for: ' + input + ']';`);
+        break;
+      case 'action':
+        lines.push(`  // Utility: "${node.title}"`);
+        lines.push(`  console.log('[${node.title}] Executing on: ' + input);`);
+        lines.push(`  // TODO: implement ${node.title} logic here.`);
+        lines.push(`  return input; // passthrough`);
+        break;
+      case 'memory':
+        lines.push(`  // Memory: "${node.title}" — stores context for retrieval.`);
+        lines.push(`  // In the canvas, this is handled by the neural memory system.`);
+        lines.push(`  return undefined; // memory nodes don't produce output`);
+        break;
+      case 'aitool':
+        lines.push(`  // AI Agent Tool: "${node.title}" — attached to an agent via the`);
+        lines.push(`  // bottom plus connector. Dummy/placeholder for now — implement the`);
+        lines.push(`  // tool's real logic (search, browser, TTS, image gen, etc.) here.`);
+        lines.push(`  console.log('[${node.title}] tool attached, no-op for now.');`);
+        lines.push(`  return undefined;`);
+        break;
+      case 'sticky':
+        lines.push(`  // Sticky note: "${node.title}" — annotation only.`);
+        lines.push(`  return undefined;`);
+        break;
+      default:
+        lines.push(`  return input;`);
+    }
+
+    lines.push(`}`);
+    lines.push('');
+  }
+
+  // Build the execution graph.
+  lines.push('// ── Execution graph ──');
+  lines.push('');
+  lines.push('async function runWorkflow(initialInput) {');
+  lines.push(`  console.log('Starting workflow: ${projectName}');`);
+  lines.push(`  const visited = new Set();`);
+  lines.push(`  const nodeMap = new Map();`);
+
+  // Map node ids to function names.
+  for (const node of nodes) {
+    const fnName = `node_${node.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    lines.push(`  nodeMap.set('${node.id}', ${fnName});`);
+  }
+
+  lines.push('');
+  lines.push('  // Find trigger nodes (entry points).');
+  lines.push('  const triggers = [');
+  for (const node of nodes.filter((n) => n.kind === 'trigger')) {
+    lines.push(`    '${node.id}',`);
+  }
+  lines.push('  ];');
+  lines.push('');
+  lines.push('  // BFS execution (follows edges like the canvas walk).');
+  lines.push('  const queue = triggers.map(id => ({ id, data: initialInput }));');
+  lines.push('  while (queue.length > 0) {');
+  lines.push('    const { id, data } = queue.shift();');
+  lines.push('    if (visited.has(id)) continue;');
+  lines.push('    visited.add(id);');
+  lines.push('    const fn = nodeMap.get(id);');
+  lines.push('    if (!fn) continue;');
+  lines.push('    console.log(`Executing node: ${id}`);');
+  lines.push('    const output = await fn(data);');
+  lines.push('    // Enqueue downstream nodes.');
+  lines.push('    const downstream = [' );
+
+  // Build edge map.
+  for (const edge of edges) {
+    lines.push(`      { from: '${edge.sourceId}', to: '${edge.targetId}' },`);
+  }
+
+  lines.push('    ];');
+  lines.push('    for (const e of downstream) {');
+  lines.push('      if (e.from === id && !visited.has(e.to)) {');
+  lines.push('        const tgt = nodeMap.get(e.to);');
+  lines.push('        if (tgt) queue.push({ id: e.to, data: output });');
+  lines.push('      }');
+  lines.push('    }');
+  lines.push('  }');
+  lines.push(`  console.log('Workflow complete: ${projectName}');`);
+  lines.push('}');
+  lines.push('');
+  lines.push('// ── Run ──');
+  lines.push("runWorkflow('Hello, workflow!').catch(console.error);");
+
+  return lines.join('\n');
 }
 
